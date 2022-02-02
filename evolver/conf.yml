@@ -11,11 +11,6 @@ experimental_params:
     fields_expected_outgoing: 2
     fields_expected_incoming: 37
     value: '1000'
-  od_135:
-    recurring: true
-    fields_expected_outgoing: 2
-    fields_expected_incoming: 37
-    value: '1000'
   od_led_left:
     recurring: true
     fields_expected_outgoing: 17
@@ -47,8 +42,22 @@ experimental_params:
     fields_expected_incoming: 17
     value: ['4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095']
 
+arduino_coordination:
+  pre_reading:
+      stir_od:
+        recurring: true
+        fields_expected_outgoing: 2
+        fields_expected_incoming: 2
+        value: '0'
+  post_reading:
+      stir_od:
+        recurring: true
+        fields_expected_outgoing: 2
+        fields_expected_incoming: 2
+        value: '1'
+
 # eVOLVER server parameter configurations
-broadcast_timing: 30
+broadcast_timing: 45
 num_sleeves: 16
 port: 8081
 

@@ -233,13 +233,13 @@ def clear_broadcast(param=None):
             command_queue.pop(i)
             break
 
-async def run_commands():
+async def run_commands(arduino_coordination):
     global command_queue, serial_connection
     data = {}
     while len(command_queue) > 0:
         command = command_queue.pop(0)
         try:
-            returned_data = serial_communication(command['param'], command['value'], command['type'])
+            returned_data = serial_communication(command['param'], command['value'], command['type'], arduino_coordination)
             if returned_data is not None:
                 data[command['param']] = returned_data
         except (TypeError, ValueError, serial.serialutil.SerialException, EvolverSerialError) as e:
@@ -247,7 +247,7 @@ async def run_commands():
             await sio.emit('serialexception', command, namespace = '/dpu-evolver')
     return data
 
-def serial_communication(param, value, comm_type):
+def serial_communication(param, value, comm_type, arduino_coordination):
     serial_connection.reset_input_buffer()
     serial_connection.reset_output_buffer()
     output = []
@@ -262,13 +262,22 @@ def serial_communication(param, value, comm_type):
        output = output + list(map(str,value))
        for i,command_value in enumerate(output):
             if command_value == 'NaN':
-                output[i] = evolver_conf['experimental_params'][param]['value'][i]
+                if arduino_coordination:
+                    output[i] = evolver_conf['arduino_coordination'][arduino_coordination][param]['value'][i]
+                else:
+                    output[i] = evolver_conf['experimental_params'][param]['value'][i]
 
     else:
         output.append(value)
 
-    fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
-    fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
+    fields_expected_incoming = None
+    fields_expected_outgoing = None
+    if arduino_coordination:
+        fields_expected_outgoing = evolver_conf['arduino_coordination'][arduino_coordination][param]['fields_expected_outgoing']
+        fields_expected_incoming = evolver_conf['arduino_coordination'][arduino_coordination][param]['fields_expected_incoming']
+    else:
+        fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
+        fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
     if len(output) is not fields_expected_outgoing:
         raise EvolverSerialError('Error: Number of fields outgoing for ' + param + ' different from expected\n\tExpected: ' + str(fields_expected_outgoing) + '\n\tFound: ' + str(len(output)))
 
@@ -332,17 +341,28 @@ def get_num_commands():
     global command_queue
     return len(command_queue)
 
-async def broadcast(commands_in_queue):
+async def broadcast(commands_in_queue, arduino_coordination):
     global command_queue
     broadcast_data = {}
     clear_broadcast()
     if not commands_in_queue:
-        for param, config in evolver_conf['experimental_params'].items():
-            if config['recurring']:
-                command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
+        if arduino_coordination:
+            for param, config in evolver_conf['arduino_coordination'][arduino_coordination].items():
+                if config['recurring']:
+                    command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
+        else:
+            for param, config in evolver_conf['experimental_params'].items():
+                if config['recurring']:
+                    command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
     # Always run commands so that IMMEDIATE requests occur. RECURRING requests only happen if no commands in queue
-    broadcast_data['data'] = await run_commands()
-    broadcast_data['config'] = evolver_conf['experimental_params']
+    broadcast_data['data'] = await run_commands(arduino_coordination)
+    if arduino_coordination:
+        broadcast_data['config'] = evolver_conf['arduino_coordination'][arduino_coordination]
+        broadcast_data['dummy'] = True
+    else:
+        broadcast_data['config'] = evolver_conf['experimental_params']
+
+
     if not commands_in_queue:
         print('Broadcasting data', flush = True)
         broadcast_data['ip'] = evolver_conf['evolver_ip']
