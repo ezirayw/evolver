@@ -43,15 +43,15 @@ if __name__ == '__main__':
         commands_in_queue = evolver_server.get_num_commands() > 0
 
         if (last_time is None or current_time - last_time > conf['broadcast_timing'] or commands_in_queue) and not running:
-            if last_time is None or current_time - last_time > conf['broadcast_timing']:
-                last_time = current_time
             try:
                 running = True
                 arduino_coordination = 'pre_reading'
                 print("Running Pre_Reading Broadcast!")
                 bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, arduino_coordination))
-                time.sleep(3)
                 print("Pre_Reading Parameters Set!")
+                print(time.time())
+                time.sleep(7)
+                print(time.time())
 
                 arduino_coordination = ''
                 print("Running True Broadcast!")
@@ -65,3 +65,5 @@ if __name__ == '__main__':
                 running = False
             except:
                 pass
+            if last_time is None or current_time - last_time > conf['broadcast_timing']:
+                last_time = time.time()

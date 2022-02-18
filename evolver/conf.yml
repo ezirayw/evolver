@@ -1,16 +1,6 @@
 ---
 # eVOLVER experimental parameter configurations
 experimental_params:
-  od_90_left:
-    recurring: true
-    fields_expected_outgoing: 2
-    fields_expected_incoming: 37
-    value: '1000'
-  od_90_right:
-    recurring: true
-    fields_expected_outgoing: 2
-    fields_expected_incoming: 37
-    value: '1000'
   od_led_left:
     recurring: true
     fields_expected_outgoing: 17
@@ -25,12 +15,22 @@ experimental_params:
     recurring: true
     fields_expected_outgoing: 5
     fields_expected_incoming: 5
-    value: ['4095', '4095', '4095', '4095']
+    value: ['1800', '1800', '1800', '1800']
   stir:
     recurring: true
     fields_expected_outgoing: 5
     fields_expected_incoming: 5
     value: ['50','50','50','50']
+  od_90_left:
+    recurring: true
+    fields_expected_outgoing: 2
+    fields_expected_incoming: 37
+    value: '100'
+  od_90_right:
+    recurring: true
+    fields_expected_outgoing: 2
+    fields_expected_incoming: 37
+    value: '100'
   pump:
     recurring: false
     fields_expected_outgoing: 49
@@ -44,13 +44,13 @@ experimental_params:
 
 arduino_coordination:
   pre_reading:
-      stir_od:
+      control:
         recurring: true
         fields_expected_outgoing: 2
         fields_expected_incoming: 2
         value: '0'
   post_reading:
-      stir_od:
+      control:
         recurring: true
         fields_expected_outgoing: 2
         fields_expected_incoming: 2
@@ -75,7 +75,7 @@ serial_end_outgoing: "_!"
 serial_end_incoming: end
 serial_port: '/dev/ttyAMA0'
 serial_baudrate: 9600
-serial_timeout: 0.3
+serial_timeout: 1
 
 recurring_command_char: r
 immediate_command_char: i

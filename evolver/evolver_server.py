@@ -283,9 +283,9 @@ def serial_communication(param, value, comm_type, arduino_coordination):
 
     # Construct the actual string and write out on the serial buffer
     serial_output = param + ','.join(output) + ',' + evolver_conf['serial_end_outgoing']
-    print(serial_output)
+    print(serial_output, flush = True)
     serial_connection.write(bytes(serial_output, 'UTF-8'))
-    time.sleep(.05)
+    time.sleep(.1)
 
     # Read and process the response
     response = serial_connection.readline().decode('UTF-8', errors='ignore')
@@ -315,7 +315,7 @@ def serial_communication(param, value, comm_type, arduino_coordination):
     serial_connection.write(bytes(serial_output, 'UTF-8'))
 
     # This is necessary to allow the ack to be fully written out to samd21 and for them to fully read
-    time.sleep(.05)
+    time.sleep(.1)
 
     if returned_data[0] == evolver_conf['data_response_char']:
         returned_data = returned_data[1:]
