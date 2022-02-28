@@ -356,6 +356,10 @@ async def broadcast(commands_in_queue, arduino_coordination):
                     command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
     # Always run commands so that IMMEDIATE requests occur. RECURRING requests only happen if no commands in queue
     broadcast_data['data'] = await run_commands(arduino_coordination)
+    #od_list_1 = ['0','1','2','3','4','5','6','7','8']*4
+    #od_list_2 = ['9','10','11','12','13','14','15','16','17']*4
+    #temp = ['1800', '1900', '2000', '2100']
+    #broadcast_data['data'] = {'od_90_left':od_list_1, 'od_90_right':od_list_2, 'temp':temp}
     if arduino_coordination:
         broadcast_data['config'] = evolver_conf['arduino_coordination'][arduino_coordination]
         broadcast_data['dummy'] = True
