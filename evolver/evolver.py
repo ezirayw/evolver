@@ -37,16 +37,33 @@ if __name__ == '__main__':
     bloop = asyncio.new_event_loop()
     last_time = None
     running = False
+    arduino_coordination = ''
     while True:
         current_time = time.time()
         commands_in_queue = evolver_server.get_num_commands() > 0
 
         if (last_time is None or current_time - last_time > conf['broadcast_timing'] or commands_in_queue) and not running:
-            if last_time is None or current_time - last_time > conf['broadcast_timing']:
-                last_time = current_time
             try:
                 running = True
-                bloop.run_until_complete(evolver_server.broadcast(commands_in_queue))
+                arduino_coordination = 'pre_reading'
+                print("Running Pre_Reading Broadcast!")
+                bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, arduino_coordination))
+                print("Pre_Reading Parameters Set!")
+                print(time.time())
+                time.sleep(7)
+                print(time.time())
+
+                arduino_coordination = ''
+                print("Running True Broadcast!")
+                bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, arduino_coordination))
+                print("Data Broadcasted!")
+
+                arduino_coordination = 'post_reading'
+                print("Resetting Parameters Until Next Reading!")
+                bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, arduino_coordination))
+                print("Post_Reading Broadcast Set!")
                 running = False
             except:
                 pass
+            if last_time is None or current_time - last_time > conf['broadcast_timing']:
+                last_time = time.time()

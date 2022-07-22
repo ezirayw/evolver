@@ -1,31 +1,36 @@
 ---
 # eVOLVER experimental parameter configurations
 experimental_params:
-  od_90:
-    recurring: true
-    fields_expected_outgoing: 2
-    fields_expected_incoming: 17
-    value: '1000'
-  od_135:
-    recurring: true
-    fields_expected_outgoing: 2
-    fields_expected_incoming: 17
-    value: '1000'
-  od_led:
+  od_led_left:
     recurring: true
     fields_expected_outgoing: 17
     fields_expected_incoming: 17
-    value: ['2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500','2500']
+    value: ['4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095']
+  od_led_right:
+    recurring: true
+    fields_expected_outgoing: 17
+    fields_expected_incoming: 17
+    value: ['4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095']
   temp:
     recurring: true
-    fields_expected_outgoing: 17
-    fields_expected_incoming: 17
-    value: ['4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095', '4095']
+    fields_expected_outgoing: 5
+    fields_expected_incoming: 5
+    value: ['1800', '1800', '1800', '1800']
   stir:
     recurring: true
-    fields_expected_outgoing: 17
-    fields_expected_incoming: 17
-    value: ['8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8', '8']
+    fields_expected_outgoing: 5
+    fields_expected_incoming: 5
+    value: ['50','50','50','50']
+  od_90_left:
+    recurring: true
+    fields_expected_outgoing: 2
+    fields_expected_incoming: 37
+    value: '100'
+  od_90_right:
+    recurring: true
+    fields_expected_outgoing: 2
+    fields_expected_incoming: 37
+    value: '100'
   pump:
     recurring: false
     fields_expected_outgoing: 49
@@ -37,8 +42,22 @@ experimental_params:
     fields_expected_incoming: 17
     value: ['4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095']
 
+arduino_coordination:
+  pre_reading:
+      control:
+        recurring: true
+        fields_expected_outgoing: 2
+        fields_expected_incoming: 2
+        value: '0'
+  post_reading:
+      control:
+        recurring: true
+        fields_expected_outgoing: 2
+        fields_expected_incoming: 2
+        value: '1'
+
 # eVOLVER server parameter configurations
-broadcast_timing: 20
+broadcast_timing: 45
 num_sleeves: 16
 port: 8081
 
