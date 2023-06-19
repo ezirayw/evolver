@@ -1,13 +1,12 @@
 import socketio
 import serial
-import evolver
 import time
-import asyncio
 import json
-import sys
 import os
 import yaml
-from traceback import print_exc
+import logging 
+
+logger = logging.getLogger(__name__)
 
 LOCATION = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 IMMEDIATE = 'immediate_command_char'
@@ -17,23 +16,24 @@ CALIBRATIONS_FILENAME = "calibrations.json"
 evolver_conf = {}
 serial_connection = None
 command_queue = []
+broadcast_options = []
 sio = socketio.AsyncServer(async_handlers=True)
 
 class EvolverSerialError(Exception):
     pass
-
+    
 @sio.on('connect', namespace = '/dpu-evolver')
 async def on_connect(sid, environ):
-    print('Connected dpu as server', flush = True)
+    logger.info('client connected to base eVOLVER server')
 
 @sio.on('disconnect', namespace = '/dpu-evolver')
 async def on_disconnect(sid):
-    print('Disconnected dpu as Server', flush = True)
+    logger.info('client disconnected from base eVOLVER server')
 
 @sio.on('command', namespace = '/dpu-evolver')
 async def on_command(sid, data):
     global command_queue, evolver_conf
-    print('Received COMMAND', flush = True)
+    logger.info('Received COMMAND')
     param = data.get('param', None)
     value = data.get('value', None)
     immediate = data.get('immediate', None)
@@ -58,12 +58,13 @@ async def on_command(sid, data):
 
 
     # Save to config the values sent in for the parameter
-    with open(os.path.realpath(os.path.join(os.getcwd(),os.path.dirname(__file__), evolver.CONF_FILENAME)), 'w') as ymlfile:
+    with open(os.path.realpath(os.path.join(os.getcwd(),os.path.dirname(__file__), 'conf.yml')), 'w') as ymlfile:
         yaml.dump(evolver_conf, ymlfile)
 
     if immediate:
         clear_broadcast(param)
         command_queue.insert(0, {'param': param, 'value': value, 'type': IMMEDIATE})
+        logger.debug('inserting immediate command into queue: %s', {'param': param, 'value': value, 'type': IMMEDIATE})
     await sio.emit('commandbroadcast', data, namespace = '/dpu-evolver')
 
 @sio.on('getconfig', namespace = '/dpu-evolver')
@@ -74,21 +75,21 @@ async def on_getlastcommands(sid, data):
 @sio.on('getcalibrationnames', namespace = '/dpu-evolver')
 async def on_getcalibrationnames(sid, data):
     calibration_names = []
-    print("Reteiving cal names...", flush = True)
+    logger.info("Reteiving cal names...")
     try:
         with open(os.path.join(LOCATION, CALIBRATIONS_FILENAME)) as f:
             calibrations = json.load(f)
             for calibration in calibrations:
                 calibration_names.append({'name': calibration['name'], 'calibrationType': calibration['calibrationType']})
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
     await sio.emit("calibrationnames", calibration_names, namespace = '/dpu-evolver')
 
 @sio.on('getfitnames', namespace = '/dpu-evolver')
 async def on_getfitnames(sid, data):
     fit_names = []
-    print("Retrieving fit names...", flush = True)
+    logger.info("Retrieving fit names...")
     try:
         with open(os.path.join(LOCATION, CALIBRATIONS_FILENAME)) as f:
             calibrations = json.load(f)
@@ -96,7 +97,7 @@ async def on_getfitnames(sid, data):
                 for fit in calibration['fits']:
                     fit_names.append({'name': fit['name'], 'calibrationType': calibration['calibrationType']})
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
     await sio.emit("fitnames", fit_names, namespace = '/dpu-evolver')
 
@@ -110,7 +111,7 @@ async def on_getcalibration(sid, data):
                     await sio.emit('calibration', calibration, namespace = '/dpu-evolver')
                     break
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
 @sio.on('setrawcalibration', namespace = '/dpu-evolver')
 async def on_setrawcalibration(sid, data):
@@ -136,7 +137,7 @@ async def on_setrawcalibration(sid, data):
             json.dump(calibrations, f)
             await sio.emit('calibrationrawcallback', 'success', namespace = '/dpu-evolver')
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
 @sio.on('setfitcalibration', namespace = '/dpu-evolver')
 async def on_setfitcalibrations(sid, data):
@@ -164,14 +165,14 @@ async def on_setfitcalibrations(sid, data):
         with open(os.path.join(LOCATION, CALIBRATIONS_FILENAME), 'w') as f:
             json.dump(calibrations, f)
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
 @sio.on('setactivecal', namespace = '/dpu-evolver')
 async def on_setactiveodcal(sid, data):
     try:
         active_calibrations = []
-        print("Time to set active cals. Data received: ")
-        print(data, flush = True)
+        logger.info("Time to set active cals. Data received: ")
+        logger.info(data)
         with open(os.path.join(LOCATION, CALIBRATIONS_FILENAME)) as f:
             calibrations = json.load(f)
             for calibration in calibrations:
@@ -188,7 +189,7 @@ async def on_setactiveodcal(sid, data):
         with open(os.path.join(LOCATION, CALIBRATIONS_FILENAME), 'w') as f:
             json.dump(calibrations, f)
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
 @sio.on('getactivecal', namespace = '/dpu-evolver')
 async def on_getactivecal(sid, data):
@@ -203,7 +204,7 @@ async def on_getactivecal(sid, data):
                         break;
         await sio.emit('activecalibrations', active_calibrations, namespace = '/dpu-evolver')
     except FileNotFoundError:
-        print_calibration_file_error()
+        logging.warning("Error reading calibrations file.")
 
 @sio.on('getdevicename', namespace = '/dpu-evolver')
 async def on_getdevicename(sid, data):
@@ -215,15 +216,12 @@ async def on_getdevicename(sid, data):
 @sio.on('setdevicename', namespace = '/dpu-evolver')
 async def on_setdevicename(sid, data):
     config_path = os.path.join(LOCATION)
-    print('saving device name', flush = True)
+    logger.info('saving device name')
     if not os.path.isdir(config_path):
         os.mkdir(config_path)
     with open(os.path.join(config_path, evolver_conf['device']), 'w') as f:
         f.write(json.dumps(data))
     await sio.emit('broadcastname', data, namespace = '/dpu-evolver')
-
-def print_calibration_file_error():
-    print("Error reading calibrations file.", flush = True)
 
 def clear_broadcast(param=None):
     """ Removes broadcast commands of a specific param from queue """
@@ -233,21 +231,21 @@ def clear_broadcast(param=None):
             command_queue.pop(i)
             break
 
-async def run_commands(arduino_coordination):
+async def run_commands(broadcast_tag):
     global command_queue, serial_connection
     data = {}
     while len(command_queue) > 0:
         command = command_queue.pop(0)
         try:
-            returned_data = serial_communication(command['param'], command['value'], command['type'], arduino_coordination)
+            returned_data = serial_communication(command['param'], command['value'], command['type'], broadcast_tag)
             if returned_data is not None:
                 data[command['param']] = returned_data
         except (TypeError, ValueError, serial.serialutil.SerialException, EvolverSerialError) as e:
-            print_exc(file = sys.stdout)
-            await sio.emit('serialexception', command, namespace = '/dpu-evolver')
+            logger.error(e)
     return data
 
-def serial_communication(param, value, comm_type, arduino_coordination):
+def serial_communication(param, value, comm_type, broadcast_tag):
+    global broadcast_options
     serial_connection.reset_input_buffer()
     serial_connection.reset_output_buffer()
     output = []
@@ -257,39 +255,65 @@ def serial_communication(param, value, comm_type, arduino_coordination):
         output.append(evolver_conf[RECURRING])
     if comm_type == IMMEDIATE:
         output.append(evolver_conf[IMMEDIATE])
+        logger.debug('serial communication immediate command: %s', output)
 
+    logger.debug('hello')
+    logger.debug('param is: %s' % (param))
     if type(value) is list:
        output = output + list(map(str,value))
+       logger.debug('output type is %s and new output is %s' % (type(value), output))
        for i,command_value in enumerate(output):
+            logger.debug('beeeelp')
             if command_value == 'NaN':
-                if arduino_coordination:
-                    output[i] = evolver_conf['arduino_coordination'][arduino_coordination][param]['value'][i]
+                if broadcast_tag in broadcast_options:
+                    output[i] = evolver_conf['broadcast_tags'][broadcast_tag][param]['value'][i-1]
                 else:
-                    output[i] = evolver_conf['experimental_params'][param]['value'][i]
+                    output[i] = evolver_conf['experimental_params'][param]['value'][i-1]
 
     else:
         output.append(value)
-
+        logger.debug('appended output %s and its length %s' % (output, len(output)))
+    
+    logger.debug('heddo')
+    logger.debug(output)
     fields_expected_incoming = None
     fields_expected_outgoing = None
-    if arduino_coordination:
-        fields_expected_outgoing = evolver_conf['arduino_coordination'][arduino_coordination][param]['fields_expected_outgoing']
-        fields_expected_incoming = evolver_conf['arduino_coordination'][arduino_coordination][param]['fields_expected_incoming']
+    logger.debug('len(output) is: %s' % (len(output)))
+        
+    if broadcast_tag in broadcast_options:
+        if param in evolver_conf['broadcast_tags'][broadcast_tag]:
+            logger.debug('wtf')
+            fields_expected_outgoing = evolver_conf['broadcast_tags'][broadcast_tag][param]['fields_expected_outgoing']
+            fields_expected_incoming = evolver_conf['broadcast_tags'][broadcast_tag][param]['fields_expected_incoming']
+        if param in evolver_conf['experimental_params']:
+            logger.debug('ewww')
+            fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
+            fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
+    
     else:
+        logger.debug('loser')
         fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
         fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
+        logger.debug(fields_expected_incoming)
+        logger.debug(fields_expected_outgoing)
+    
     if len(output) is not fields_expected_outgoing:
-        raise EvolverSerialError('Error: Number of fields outgoing for ' + param + ' different from expected\n\tExpected: ' + str(fields_expected_outgoing) + '\n\tFound: ' + str(len(output)))
+        logger.warning('EvolverSerialError')
+        logger.warning('Error: Number of fields outgoing for ' + param + ' different from expected\n\tExpected: ' + str(fields_expected_outgoing) + '\n\tFound: ' + str(len(output)))
+
+    logger.debug('bye')
 
     # Construct the actual string and write out on the serial buffer
     serial_output = param + ','.join(output) + ',' + evolver_conf['serial_end_outgoing']
-    print(serial_output, flush = True)
+    logger.debug(serial_output)
     serial_connection.write(bytes(serial_output, 'UTF-8'))
     time.sleep(evolver_conf['serial_delay'])
 
+    logger.debug('whatsup')
+
     # Read and process the response
     response = serial_connection.readline().decode('UTF-8', errors='ignore')
-    print(response, flush = True)
+    logger.debug(response)
     address = response[0:len(param)]
     if address != param:
         raise EvolverSerialError('Error: Response has incorrect address.\n\tExpected: ' + param + '\n\tFound:' + address)
@@ -311,15 +335,11 @@ def serial_communication(param, value, comm_type, arduino_coordination):
     serial_output = [''] * fields_expected_outgoing
     serial_output[0] = evolver_conf['acknowledge_char']
     serial_output = param + ','.join(serial_output) + ',' + evolver_conf['serial_end_outgoing']
-    print(serial_output, flush = True)
+    logger.debug(serial_output)
     serial_connection.write(bytes(serial_output, 'UTF-8'))
 
     # This is necessary to allow the ack to be fully written out to samd21 and for them to fully read
-<<<<<<< HEAD
     time.sleep(evolver_conf['serial_delay'])
-=======
-    time.sleep(.1)
->>>>>>> d64206228fe19fb27112a1c37ed8c6c2cf32f415
 
     if returned_data[0] == evolver_conf['data_response_char']:
         returned_data = returned_data[1:]
@@ -345,13 +365,14 @@ def get_num_commands():
     global command_queue
     return len(command_queue)
 
-async def broadcast(commands_in_queue, arduino_coordination):
-    global command_queue
+async def broadcast(commands_in_queue, broadcast_tag):
+    global command_queue, broadcast_options
     broadcast_data = {}
     clear_broadcast()
+    broadcast_options = list(evolver_conf['broadcast_tags'].keys())
     if not commands_in_queue:
-        if arduino_coordination:
-            for param, config in evolver_conf['arduino_coordination'][arduino_coordination].items():
+        if broadcast_tag in broadcast_options:
+            for param, config in evolver_conf['broadcast_tags'][broadcast_tag].items():
                 if config['recurring']:
                     command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
         else:
@@ -359,21 +380,16 @@ async def broadcast(commands_in_queue, arduino_coordination):
                 if config['recurring']:
                     command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
     # Always run commands so that IMMEDIATE requests occur. RECURRING requests only happen if no commands in queue
-    broadcast_data['data'] = await run_commands(arduino_coordination)
-    #od_list_1 = ['0','1','2','3','4','5','6','7','8']*4
-    #od_list_2 = ['9','10','11','12','13','14','15','16','17']*4
-    #temp = ['1800', '1900', '2000', '2100']
-    #broadcast_data['data'] = {'od_90_left':od_list_1, 'od_90_right':od_list_2, 'temp':temp}
-    if arduino_coordination:
-        broadcast_data['config'] = evolver_conf['arduino_coordination'][arduino_coordination]
+    broadcast_data['data'] = await run_commands(broadcast_tag)
+    if broadcast_tag in broadcast_options:
+        broadcast_data['config'] = evolver_conf['broadcast_tags'][broadcast_tag]
         broadcast_data['dummy'] = True
     else:
         broadcast_data['config'] = evolver_conf['experimental_params']
 
 
     if not commands_in_queue:
-        print('Broadcasting data', flush = True)
         broadcast_data['ip'] = evolver_conf['evolver_ip']
         broadcast_data['timestamp'] = time.time()
-        print(broadcast_data, flush = True)
+        logging.info('Broadcasting data %s', (broadcast_data))
         await sio.emit('broadcast', broadcast_data, namespace='/dpu-evolver')

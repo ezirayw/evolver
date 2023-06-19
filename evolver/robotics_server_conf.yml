@@ -1,0 +1,65 @@
+---
+# network settings
+xarm_ip: "192.168.1.200"
+headers:
+    Content-Type: "application/json"
+    Authorization: "Basic azI6cENoM0hoTGhIeU1xdzJaRVk2VXJYcW9NOWVVKg=="
+    cache-control: "no-cache"
+    Postman-Token: "b1dd33bd-212f-4042-9877-e959e3f90a59"
+robotics_port: 8080 # port for fluidics server
+
+# Syringe pump settings
+pump_settings:
+  pump_num: 1
+  smoothie_num: 1
+  priming_steps: 30
+  smoothies:
+    0:
+      serial_port: '/dev/ttyACM0' # serial port smoothieboard is connected to on evolver raspberry pi
+      serial_baudrate: '115200'
+      gcode_path: "/home/pi/gcode_files/smoothie0"
+      port: 5000
+  pumps:
+    base_media:
+      id: 0
+      smoothie: 0
+      motor_connections:
+        valve_steps: 30
+        valve: 'X' # connection stepper motor that controls valve is connected to (either X, Y, Z, E0, E1)
+        plunger: 'Y' # connection stepper motor that plunger is connected to (either X, Y, Z, E0, E1)
+
+#    selection_media:
+ #     id: 1
+  #    smoothie: 0
+   #   motor_connections:
+    #    valve_steps: -30
+     #   valve: 'Z'
+      #  plunger: 'E'
+
+# xarm settings
+xarm_params:
+  roll: 180
+  pitch: 0
+  yaw: 0
+  speed: 150
+  mvacc: 600
+
+# octoprint settings
+octoprint_api_key: "0E31A9B70FAA4B839176DEE63F27727F"
+base_octoprint_path: "/home/pi/OctoPrint"
+octoprint_pkg_path: "/home/pi/.octoprint"
+
+# default robotics movements
+default_robotic_movements:
+  above_evolver:
+    x: 4
+    y: 4
+    z: 3
+
+  above_to_zero:
+    x: 10
+    y: 15
+    z: 20
+
+
+

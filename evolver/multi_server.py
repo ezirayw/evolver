@@ -2,7 +2,6 @@ import asyncio
 from aiohttp import web
 from threading import Thread
 
-
 class MultiServer:
 
     def __init__(self, loop=None):
@@ -26,23 +25,29 @@ class MultiServer:
             await ws.close()
         app['websockets'].clear()
 
+    async def start_site(self, app):
+        address='0.0.0.0'
+        runner = web.AppRunner(app[0])
+        await runner.setup()
+        site = web.TCPSite(runner, address, app[1])
+        await site.start()
+
     def run_all(self):
+        app_num = 0
         try:
             for app in self._apps:
                 app[0]['websockets'] = {}
                 app[0].on_shutdown.append(MultiServer.shutdown)
 
-                runner = web.AppRunner(app[0])
-                self.loop.run_until_complete(runner.setup())
+                self.loop.create_task(self.start_site(app))
 
-                site = web.TCPSite(runner, '0.0.0.0', app[1])
-                self.loop.run_until_complete(site.start())
-
-                names = sorted(str(s.name) for s in runner.sites)
-                print("======== Running on {} ========".format(', '.join(names)))
-                t = Thread(target = start_background_loop, args = (self.loop,))
-                t.daemon = True
-                t.start()
+                #names = sorted(str(s.name) for s in runner.sites)
+                #print("======== Running on {} ========".format(', '.join(names)))
+                print('Running app {0}'. format(app_num))
+                app_num += 1
+            t = Thread(target = start_background_loop, args = (self.loop,))
+            t.daemon = True
+            t.start()
 
         except KeyboardInterrupt:
             print('Exiting application due to KeyboardInterrupt')

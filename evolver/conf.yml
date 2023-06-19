@@ -20,7 +20,7 @@ experimental_params:
     recurring: true
     fields_expected_outgoing: 5
     fields_expected_incoming: 5
-    value: ['50','50','50','50']
+    value: ['0','0','0','0']
   od_90_left:
     recurring: true
     fields_expected_outgoing: 2
@@ -31,6 +31,11 @@ experimental_params:
     fields_expected_outgoing: 2
     fields_expected_incoming: 37
     value: '100'
+  syringe_pump:
+    recurring: false
+    fields_expected_outgoing: 49
+    fields_expected_incoming: 49
+    value: null
   pump:
     recurring: false
     fields_expected_outgoing: 49
@@ -42,7 +47,7 @@ experimental_params:
     fields_expected_incoming: 17
     value: ['4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095','4095']
 
-arduino_coordination:
+broadcast_tags:
   pre_reading:
       control:
         recurring: true
@@ -59,7 +64,7 @@ arduino_coordination:
 # eVOLVER server parameter configurations
 broadcast_timing: 45
 num_sleeves: 16
-port: 8081
+evolver_port: 8081
 
 # RPi file locations and names
 device: evolver-config.json
