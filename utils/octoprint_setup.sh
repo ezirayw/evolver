@@ -99,10 +99,10 @@ if [ "$create_servers" = true ]; then
         files=("$initPath" "$defaultPath")
 
         # Copy directories from backup to make necessary server directories and files
-        cp -r "/home/pi/.octoprint.bck" "$packageDir"
-        cp -r "/home/pi/OctoPrint.bck" "$OctoPrintDir"
-        cp "/etc/default/octoprint.bck" "$defaultPath"
-        cp "/etc/init.d/octoprint.bck" "$initPath"
+        cp -r "./octoprint_backup_directories/.octoprint.bck" "$packageDir"
+        cp -r "./octoprint_backup_directories/OctoPrint.bck" "$OctoPrintDir"
+        cp "./octoprint_backup_files/octoprint_default.bck" "$defaultPath"
+        cp "./octoprint_backup_files/octoprint_init.bck" "$initPath"
 
         # Search and replace instances of "x.bck" with "x.id" in server files 
         search_phrase_1="OctoPrint.bck"
@@ -118,7 +118,7 @@ if [ "$create_servers" = true ]; then
 
         # Setup port server uses (5000 + id)
         port=$((5000 + id))
-        sed -i "s/4000/$port/g" "$defaultPath" 
+        sed -i "s/5000/$port/g" "$defaultPath" 
         # Enable octoprint service
         sudo update-rc.d octoprint$id defaults
     done

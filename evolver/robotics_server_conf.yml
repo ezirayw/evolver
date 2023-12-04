@@ -12,7 +12,9 @@ robotics_port: 8080 # port for fluidics server
 pump_settings:
   pump_num: 1
   smoothie_num: 1
-  priming_steps: 30
+  priming_steps: 50
+  plunger_speed_in: 15000
+  plunger_speed_out: 9000
   smoothies:
     0:
       serial_port: '/dev/ttyACM0' # serial port smoothieboard is connected to on evolver raspberry pi
@@ -41,16 +43,19 @@ xarm_params:
   roll: 180
   pitch: 0
   yaw: 0
-  speed: 150
-  mvacc: 600
+  speed: 750
+  mvacc: 1000
 
 # octoprint settings
-octoprint_api_key: "0E31A9B70FAA4B839176DEE63F27727F"
-base_octoprint_path: "/home/pi/OctoPrint"
-octoprint_pkg_path: "/home/pi/.octoprint"
+octoprint_api_key: "B6EE0555EF414DA7B561496C10C4DE25"
 
 # default robotics movements
-default_robotic_movements:
+default_arm_positions:
+  initial_position:
+    x: 207
+    y: 0
+    z: 182
+
   above_evolver:
     x: 4
     y: 4
@@ -60,6 +65,61 @@ default_robotic_movements:
     x: 10
     y: 15
     z: 20
+
+homing_coordinates:
+  quad_0:
+    vial_1:
+      x_out: 77
+      x_in: 73
+      y: -470.2
+      z_out: 467
+      z_in: 430 
+    vial_17:
+      x_out: 112
+      x_in: 108
+      y: -381
+
+  quad_1:
+    vial_0:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None 
+    vial_17:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None 
+
+  quad_2:
+    vial_0:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None 
+    vial_17:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None
+  
+  quad_3:
+    vial_0:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None 
+    vial_17:
+      x_out: None
+      x_in: None
+      y: None
+      z_out: None
+      z_in: None 
 
 
 

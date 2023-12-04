@@ -15,7 +15,7 @@ experimental_params:
     recurring: true
     fields_expected_outgoing: 5
     fields_expected_incoming: 5
-    value: ['1800', '1800', '1800', '1800']
+    value: ['1866', '1866', '1866', '1866']
   stir:
     recurring: true
     fields_expected_outgoing: 5

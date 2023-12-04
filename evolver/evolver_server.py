@@ -1,4 +1,5 @@
 import socketio
+import asyncio
 import serial
 import time
 import json
@@ -369,7 +370,8 @@ async def broadcast(commands_in_queue, broadcast_tag):
     global command_queue, broadcast_options
     broadcast_data = {}
     clear_broadcast()
-    broadcast_options = list(evolver_conf['broadcast_tags'].keys())
+    for broadcast_option in list(evolver_conf['broadcast_tags'].keys()):
+        broadcast_options.append(broadcast_option)
     if not commands_in_queue:
         if broadcast_tag in broadcast_options:
             for param, config in evolver_conf['broadcast_tags'][broadcast_tag].items():

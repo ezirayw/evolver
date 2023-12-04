@@ -1,14 +1,24 @@
-import time, os, json
+import time, os
+import numpy as np
 import yaml
 import aiohttp
+import requests
 import socketio
 import asyncio
 import shutil
 import logging
+import skimage as ski
+from xarm.wrapper import XArmAPI
 
 logger = logging.getLogger(__name__)
+
+#### CLIENT SIDE CODE ####
+# enables communication with eVOLVER server to coordinate robotic tasks with eVOLVER
+
+# GENERAL CLIENT VARIABLES # 
 EVOLVER_NS = None
 
+# define namespace events to communicate with eVOLVER server
 class EvolverNamespace(socketio.ClientNamespace):
     def on_connect(self, *args):
         logger.info('robotics_eVOLVER connected to base_eVOLVER server')
@@ -30,8 +40,11 @@ def setup_client(socketIO_client):
     EVOLVER_NS = EvolverNamespace('/dpu-evolver')
     socketIO_client.register_namespace(EVOLVER_NS)
 
+#### END OF CLIENT SIDE CODE ####
 
-sio = socketio.AsyncServer(async_handlers=True, ping_timeout=60)
+##### SERVER SIDE CODE #####
+# robotics server that runs on Raspberry Pi. Processes event based calls from dpu or other clients to control robotics hardware. Handles communication with OctoPi and XArm servers
+sio = socketio.AsyncServer(async_handlers=True)
 def attach(app):
     """
         Attach the server to the web application.
@@ -39,28 +52,37 @@ def attach(app):
     """
     sio.attach(app)
 
-##### ROBOTICS SERVER VARIABLES #####
+# GENERAL SERVER VARIABLES #
+# master variable that is continuously updated throughout robotics_server lifetime to track various states
 ROBOTICS_STATUS = {
-    "operation": 'idle',
-    "active_quad": None,
-    "active_vials": None
-}
+    'mode': 'idle',
+    'active_quad': None,
+    'vial_window': None,
+    'xArm':{
+        'warning_code': 0,
+        'error_code': 0,
+        'arm_state': None
+        },
+    'syringe_pumps': {
+        'OctoPrint_instances':[],
+        'syringe_pump_status': [],
+        'prime': False
+        }
+    }
 
-# get settings from yaml file to setup server
 SERVER_PATH = os.path.dirname(os.path.abspath(__file__))
 ROBOTICS_CONFIG_PATH = os.path.join(SERVER_PATH, 'robotics_server_conf.yml')
 DILUTIONS_PATH = os.path.join(SERVER_PATH)
-ROBOTICS_CALIBRATION_PATH = os.path.join(SERVER_PATH, 'robotics_calibrations.json')
 
 with open(ROBOTICS_CONFIG_PATH,'r') as conf:
     robotics_conf = yaml.safe_load(conf)
 
 XARM_IP = robotics_conf['xarm_ip']
+XARM_INITIAL_POSITION = {'x': robotics_conf['default_arm_positions']['initial_position']['x'], 'y': robotics_conf['default_arm_positions']['initial_position']['y'], 'z': robotics_conf['default_arm_positions']['initial_position']['z']}
 API_KEY = robotics_conf['octoprint_api_key']
 PUMP_SETTINGS = robotics_conf['pump_settings']
 
-# create urls for each octoprint server instance (1 per syringe pump)
-# create necessary gcode directories for each syringe pump
+# create urls for each octoprint server instance (1 per syringe pump) + necessary gcode directories for each syringe pump
 OCTOPRINT_URLS = {}
 for smoothie in PUMP_SETTINGS['smoothies']:
     url = "http://" + '192.168.1.15:' + str(PUMP_SETTINGS['smoothies'][smoothie]['port'])
@@ -70,60 +92,67 @@ for smoothie in PUMP_SETTINGS['smoothies']:
         shutil.rmtree(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'])
     os.makedirs(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'])
 
+# END OF GENERAL SERVER VARIABLES #
 
-############## xARM INITIALIZATION CODE ##################
-"""
-# xArm-Python-SDK: https://github.com/xArm-Developer/xArm-Python-SDK
-# git clone git@github.com:xArm-Developer/xArm-Python-SDK.git
-# cd xArm-Python-SDK
-# python setup.py install
-"""
-from xarm import version
-from xarm.wrapper import XArmAPI
-
+# xARM INITIALIZATION CODE #
 arm = XArmAPI(XARM_IP)
+
+# xArm callback functions
+def error_warn_change_callback(data):
+    ROBOTICS_STATUS['xArm']['error_code'] = data['error_code']
+    ROBOTICS_STATUS['xArm']['warn_code'] = data['warn_code']
+    if data['error_code'] != 0:
+        stop_robotics()
+        logger.error('xArm error_code %s encountered. Stopping all robotics and killing active routine(s)', (data['error_code']))
+    if data['warn_code'] != 0:
+        logger.error('xArm warning_code %s encountered.', (data['warn_code']))
+    arm.release_error_warn_changed_callback(error_warn_change_callback)
+
+def state_changed_callback(data):
+    if data['state']:
+        ROBOTICS_STATUS['xArm']['arm_state'] = data['state']
+
+# Register callback functions with arm
+arm.register_error_warn_changed_callback(callback=error_warn_change_callback)
+arm.register_state_changed_callback(callback=state_changed_callback)
+
+# Set initial arm parameters
 arm.clean_warn()
 arm.clean_error()
 arm.motion_enable(enable=True)
 arm.set_mode(0)
 arm.set_state(state=0)
-arm.reset(wait=True)
+ROBOTICS_STATUS['xArm']['arm_state'] = arm.get_state()
 
-time.sleep(1)
+# End of xARM INITIALIZATION CODE #
 
-params = {'speed': 5, 'acc': 2000, 'angle_speed': 20, 'angle_acc': 500, 'events': {}, 'variables': {}, 'quit': False}
+# SERVER FUNCTIONS #
+def stop_robotics():
+    """ Stop all robotics. Called to stop robotics in event of errors and/or emergencies. Will interupt any concurrent robotic tasks and prevent future tasks if interrepted during a routine. """
+    global ROBOTICS_STATUS
 
-# Register error/warn changed callback
-def error_warn_change_callback(data):
-    if data and data['error_code'] != 0:
-        arm.set_state(4)
-        params['quit'] = True
-        logger.warning('err={}, quit'.format(data['error_code']))
-        arm.release_error_warn_changed_callback(error_warn_change_callback)
-arm.register_error_warn_changed_callback(error_warn_change_callback)
+    # emergency stop xArm and cancel current syringe job commands and disconnect from OctoPrint servers
+    payload_1 = {'command': 'cancel'}
+    payload_2 = {'command': 'disconnect'}
+    for url in OCTOPRINT_URLS:
+        temp_url_1 = OCTOPRINT_URLS[url] + '/api/job'
+        temp_url_2 = OCTOPRINT_URLS[url] + '/api/connection'
+        header = {'X-Api-Key': API_KEY, 'Content-Type': 'application/json'}
+        try:
+            arm.emergency_stop()
+            requests.post(temp_url_1, headers=header, params=payload_1)
+            requests.post(temp_url_2, headers=header, params=payload_2)
+            logger.info('robotics abruptly stopped - check logs to identify cause of error')
 
-
-# Register state changed callback
-def state_changed_callback(data):
-    if data and data['state'] == 4:
-        if arm.version_number[0] >= 1 and arm.version_number[1] >= 1 and arm.version_number[2] > 0:
-            params['quit'] = True
-            logger.debug('state=4, quit')
-            arm.release_state_changed_callback(state_changed_callback)
-arm.register_state_changed_callback(state_changed_callback)
-
-
-# Register counter value changed callback
-if hasattr(arm, 'register_count_changed_callback'):
-    def count_changed_callback(data):
-        logger.debug('counter val: ' + str(data['count']))
-    arm.register_count_changed_callback(count_changed_callback)
-
-############### END xARM INIT ##################
-## This script is to define smoothieboard related functions, such as priming fluidic lines or dispensing volumes into vials
+            # update ROBOTICS_STATUS mode
+            ROBOTICS_STATUS['mode'] = 'emergency_stop'
+            return
+        except:
+            return
 
 def write_gcode(mode, instructions, gcode='', gcode_path=''):
     """ Write gcode file for dispensing volumes into vials """
+    
     # use motor connection settings from config to map pump instructions to proper smoothieboards
     smoothie_instructions_map = {}
     for smoothie in PUMP_SETTINGS['smoothies']:
@@ -149,7 +178,7 @@ def write_gcode(mode, instructions, gcode='', gcode_path=''):
 
             # combine gcode commands
             command = plunger_in_commands[0] + ' ' + plunger_in_commands[1]
-            gcode = "G91\nG1 {0} F15000\nM18".format(command)
+            gcode = "G91\nG1 {0} F{1}\nM18".format(command, PUMP_SETTINGS['plunger_speed_in'])
 
         if mode == "fill_tubing_out" or mode =='volume_out':
             for pump in smoothie_instructions_map[smoothie]:
@@ -174,9 +203,9 @@ def write_gcode(mode, instructions, gcode='', gcode_path=''):
             prime_out = prime_commands[0] + ' ' + prime_commands[1]
 
             if mode == "fill_tubing_out":
-                gcode = "G91\nG1 {0} F20000\nG1 {1} F15000\nG1 {2} F20000\nM18".format(valve_on, plunger_out, valve_off)
+                gcode = "G91\nG1 {0} F20000\nG1 {1} F{2}\nG1 {3} F20000\nM18".format(valve_on, plunger_out, PUMP_SETTINGS['plunger_speed_out'], valve_off)
             if mode == "volume_out":
-                gcode = "G91\nG1 {0} F20000\nG1 {1} F15000\nG4 P100\nG1 {2} F20000\nG1 {3} F20000\nM18".format(valve_on, plunger_out, prime_out, valve_off)
+                gcode = "G91\nG1 {0} F20000\nG1 {1} F{2}\nG4 P100\nG1 {3} F20000\nG1 {4} F20000\nM18".format(valve_on, plunger_out, PUMP_SETTINGS['plunger_speed_out'], prime_out, valve_off)
 
         if mode == "prime_pumps":
             for pump in smoothie_instructions_map[smoothie]:
@@ -191,11 +220,10 @@ def write_gcode(mode, instructions, gcode='', gcode_path=''):
                 count = count + 1
 
             # combine gcode commands
-            plunger_in = plunger_in_commands[0] + ' ' + plunger_in_commands[1]
             valve_on = valve_commands['on'][0] + ' ' + valve_commands['on'][1]
             valve_off = valve_commands['off'][0] + ' ' + valve_commands['off'][1]
 
-            gcode = 'G91\nG1 {0} F20000\nG1 {1} F15000\nG1 {2} F20000\nM18'.format(valve_on, plunger_in_commands, valve_off)
+            gcode = 'G91\nG1 {0} F20000\nG1 {1} F{2}\nG1 {3} F20000\nM18'.format(valve_on, plunger_in_commands, PUMP_SETTINGS['plunger_speed_in'], valve_off)
         else:
             gcode = gcode
 
@@ -208,6 +236,7 @@ def write_gcode(mode, instructions, gcode='', gcode_path=''):
 
 async def post_gcode_async(session, gcode_path, smoothie):
     """ Return response status of POST request to Ocotprint server for actuating syringe pump """
+    
     payload = {'file': open(gcode_path, 'rb'), 'print':'true'}
 
     # get url for target smoothie server and make API request to send gcode file to actuate pumps
@@ -216,13 +245,12 @@ async def post_gcode_async(session, gcode_path, smoothie):
     try:
         async with session.post(url, headers=header, data=payload) as response:
             return await response.json()
-    except aiohttp.ClientError as e:
+    except Exception as e:
         return 'retry'
-    else:
-        return 'post_gcode_async error'
 
 async def check_job(session, smoothie):
     """ Return completion status of syringe pump actuation via GET request to Ocotprint server """
+    
     # get url for target smoothie server and make API request to get pump status information
     url = OCTOPRINT_URLS[smoothie] + '/api/job'
     header={'X-Api-Key': API_KEY }
@@ -234,6 +262,7 @@ async def check_job(session, smoothie):
 
 async def check_status(session, gcode_paths):
     """ Return completion status of desired pump actuation event based on gcode path given. Returns True if desired pump(s) are ready for new actuation event, False if not """
+    
     status_tasks = []
     for gcode_path in gcode_paths:
         # map gcode file to cognate smoothie
@@ -255,428 +284,426 @@ async def check_status(session, gcode_paths):
             return True
         else:
             return False
-
     except Exception as e:
         return False
 
 async def prime_pumps_helper():
     """ Call this function to prime pumps after filling tubing """
-    session = aiohttp.ClientSession()
-
-    # get fluid pumps from server_conf and write prime pumps instructions
-    instructions = {}
-    print_string = ''
-
-    # load in current config
-    with open(ROBOTICS_CONFIG_PATH,'r') as conf:
-        robotics_conf = yaml.safe_load(conf)
-    PUMP_SETTINGS = robotics_conf['pump_settings']
-
-    for pump in PUMP_SETTINGS['pumps']:
-        print_string = print_string + '{0} pump'.format(pump)
-        instructions[pump] = PUMP_SETTINGS['priming_steps']
-    write_gcode('prime_pumps', instructions)
-
-    # create tasks for prime pump events
-    try:
-        prime_pumps_tasks = [None] * PUMP_SETTINGS['smoothie_num']
-        check_files = [None] * PUMP_SETTINGS['smoothie_num']
-        prime_pumps_results = []
-        while True:
-            for smoothie in range(PUMP_SETTINGS['smoothie_num']):
-                gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'prime_pumps.gcode')
-                prime_pumps_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
-                check_files[smoothie] = gcode_path
-
-            prime_pumps_results = await asyncio.gather(*prime_pumps_tasks)
-            if 'retry' in prime_pumps_results:
-                pass
-            else:
-                break
-        logger.debug('priming %s', (print_string))
-
-    except Exception as e:
-        await session.close()
-        return 'error filling out tubing'
-
-    # verify that robotic pipette has executed fill out events
-    tasks_complete_prime_pumps = 0
-    for result in prime_pumps_results:
-        if result['done'] == True:
-            tasks_complete_prime_pumps = tasks_complete_prime_pumps + 1
-
-    # check status of pumps before priming pumps
-    if prime_pumps_tasks == len(prime_pumps_tasks):
-        while True:
-            check = await check_status(session, check_files)
-            if check:
-                break
-            else:
-                pass
-        await session.close()
-        return 'priming pumps success'
-    else:
-        await session.close()
-        return 'prime_pumps tasks not completed {0}'.format(print_string)
-
-
-async def fill_tubing_helper():
-    """ Call this function to fill tubing lines for all pumps that are in fluid mode (check/update server_conf.yml to set modes for pumps) """
-    # update status
     global ROBOTICS_STATUS
-    ROBOTICS_STATUS = {
-        "operation": "fill_tubing",
-        "active_quad": None,
-        "active_vials": None
-    }
+
+    if ROBOTICS_STATUS['mode'] == 'idle':
+
+        ROBOTICS_STATUS['mode'] = 'priming'
+        # start asyncio Client Session
+        session = aiohttp.ClientSession()
     
-    # start asyncio Client Session
-    session = aiohttp.ClientSession()
+        # get fluid pumps from server_conf and write prime pumps instructions
+        instructions = {}
+        print_string = ''
 
-    # get fluid pumps from server_conf
-    instructions = {}
-    print_string = ''
+        # load in current config
+        with open(ROBOTICS_CONFIG_PATH,'r') as conf:
+            robotics_conf = yaml.safe_load(conf)
+        PUMP_SETTINGS = robotics_conf['pump_settings']
 
-    # load in current config
-    with open(ROBOTICS_CONFIG_PATH,'r') as conf:
-        robotics_conf = yaml.safe_load(conf)
-    PUMP_SETTINGS = robotics_conf['pump_settings']
+        for pump in PUMP_SETTINGS['pumps']:
+            print_string = print_string + '{0} pump'.format(pump)
+            instructions[pump] = PUMP_SETTINGS['priming_steps']
+        write_gcode('prime_pumps', instructions)
 
-    for pump in PUMP_SETTINGS['pumps']:
-        print_string = print_string + '{0} pump '.format(pump)
-        instructions[pump] = 300
-    write_gcode('fill_tubing_in', instructions)
-    write_gcode('fill_tubing_out', instructions)
-
-    # create tasks for fill_tubing input events
-    try:
-        check_files = [None] * PUMP_SETTINGS['smoothie_num']
-        fill_in_tasks = [None] * PUMP_SETTINGS['smoothie_num']
-        fill_in_results = []
-        while True:
-            for smoothie in range(PUMP_SETTINGS['smoothie_num']):
-                gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'fill_tubing_in.gcode')
-                fill_in_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
-                check_files[smoothie] = gcode_path
-            fill_in_results = await asyncio.gather(*fill_in_tasks)
-            if fill_in_results[0] == 'retry':
-                pass
-            else:
-                break
-        logger.debug('filling in tubing for %s', (print_string))
-
-    except Exception as e:
-        logger.warning('error filling in tubing')
-        ROBOTICS_STATUS = {
-            "operation": "error",
-            "active_quad": None,
-            "active_vials": None
-        }
-        await session.close()
-        return 'error filling in tubing'
-
-    # verify that robotic pipette has executed input events
-    tasks_complete_fill_in = 0
-    for result in fill_in_results:
-        if result['done'] == True:
-            tasks_complete_fill_in = tasks_complete_fill_in + 1
-
-    # check status of pumps before moving to fill out events
-    if tasks_complete_fill_in == len(fill_in_tasks):
-        while True:
-            check = await check_status(session, check_files)
-            if check:
-                break
-            else:
-                pass
-
-        # create tasks for fill out events
+        # create syringe_pump priming commands
         try:
-            fill_out_tasks = [None] * PUMP_SETTINGS['smoothie_num']
+            prime_pumps_tasks = [None] * PUMP_SETTINGS['smoothie_num']
             check_files = [None] * PUMP_SETTINGS['smoothie_num']
-            fill_out_results = []
+            prime_pumps_results = []
             while True:
                 for smoothie in range(PUMP_SETTINGS['smoothie_num']):
-                    gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'fill_tubing_out.gcode')
-                    fill_out_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
+                    gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'prime_pumps.gcode')
+                    prime_pumps_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
                     check_files[smoothie] = gcode_path
 
-                fill_out_results = await asyncio.gather(*fill_out_tasks)
-                if fill_out_results[0] == 'retry':
+                prime_pumps_results = await asyncio.gather(*prime_pumps_tasks)
+                if 'retry' in prime_pumps_results:
                     pass
                 else:
                     break
-            logger.debug('filling out tubing for %s', (print_string))
-
+            logger.debug('priming %s', (print_string))
         except Exception as e:
-            logger.warning('error filling out tubing')
-            ROBOTICS_STATUS = {
-                "operation": "error",
-                "active_quad": None,
-                "active_vials": None
-            }
             await session.close()
-            return 'error filling out tubing'
+            logger.error('error priming pumps: %s' %(e))
+            return
 
-        # verify that robotic pipette has executed fill out events
-        tasks_complete_fill_out = 0
-        for result in fill_out_results:
+        # verify that syringe pumps executed priming commands
+        commands_complete = 0
+        for result in prime_pumps_results:
             if result['done'] == True:
-                tasks_complete_fill_out = tasks_complete_fill_out + 1
+                commands_complete = commands_complete + 1
 
-        # check status of pumps before priming pumps
-        if tasks_complete_fill_out == len(fill_out_tasks):
+        # verify status of syringe_pumps to receive future commands
+        if commands_complete == len(prime_pumps_tasks):
+            ROBOTICS_STATUS['syringe_pumps']['prime'] = True
             while True:
                 check = await check_status(session, check_files)
                 if check:
                     break
                 else:
                     pass
-        else:
-            logger.warning('cant validate that filling out tasks for %s were comleted', (print_string))
-            ROBOTICS_STATUS = {
-                "operation": "error",
-                "active_quad": None,
-                "active_vials": None
-            }
             await session.close()
-            return 'cant validate that filling out tasks for {0} were completed'.format(print_string)
-    else:
-        logger.warning('cant validate that filling in tasks for %s were comleted', (print_string))
-        ROBOTICS_STATUS = {
-            "operation": "error",
-            "active_quad": None,
-            "active_vials": None
-        }
-        await session.close()
-        return 'cant validate that filling in tasks for {0} were comleted'.format(print_string)
-    
-    ROBOTICS_STATUS = {
-        "operation": "idle",
-        "active_quad": None,
-        "active_vials": None
-    }
+            ROBOTICS_STATUS['mode'] = 'idle'
+            logger.info('syringe pumps successfully primed for future dispensing')
+            return
+        else:
+            await session.close()
+            ROBOTICS_STATUS['xArm']['prime'] = False
+            ROBOTICS_STATUS['mode'] = 'idle'
+            logger.error('error priming syringe pumps')
+            return
 
-    await session.close()
-    return 'fill tubing cycle success'
+async def fill_tubing_helper():
+    """ Call this function to fill tubing lines for all pumps that are in fluid mode (check/update server_conf.yml to set modes for pumps) """
+    global ROBOTICS_STATUS
+
+    # check status before executing robotic function
+    if ROBOTICS_STATUS['mode'] == 'idle':
+        
+        ROBOTICS_STATUS['mode'] = 'fill_tubing'
+        # start asyncio Client Session
+        session = aiohttp.ClientSession()
+
+        # get fluid pumps from server_conf
+        instructions = {}
+        print_string = ''
+
+        # load in current config
+        with open(ROBOTICS_CONFIG_PATH,'r') as conf:
+            robotics_conf = yaml.safe_load(conf)
+        PUMP_SETTINGS = robotics_conf['pump_settings']
+
+        for pump in PUMP_SETTINGS['pumps']:
+            print_string = print_string + '{0} pump '.format(pump)
+            instructions[pump] = 350
+        write_gcode('fill_tubing_in', instructions)
+        write_gcode('fill_tubing_out', instructions)
+
+        # create pre-dispense commands
+        try:
+            check_files = [None] * PUMP_SETTINGS['smoothie_num']
+            fill_in_tasks = [None] * PUMP_SETTINGS['smoothie_num']
+            fill_in_results = []
+            while True:
+                for smoothie in range(PUMP_SETTINGS['smoothie_num']):
+                    gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'fill_tubing_in.gcode')
+                    fill_in_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
+                    check_files[smoothie] = gcode_path
+                fill_in_results = await asyncio.gather(*fill_in_tasks)
+                if fill_in_results[0] == 'retry':
+                    pass
+                else:
+                    break
+            logger.debug('filling in tubing for %s', (print_string))
+
+        except Exception as e:
+            logger.warning('error filling in tubing')
+            stop_robotics()
+            await session.close()
+            return
+
+        # verify that pre-dispense commands executed
+        commands_complete = 0
+        for result in fill_in_results:
+            if result['done'] == True:
+                commands_complete = commands_complete + 1
+
+        # verify that syringe_pumps are ready to receieve dispense commands
+        if commands_complete == len(fill_in_tasks):
+            while True:
+                check = await check_status(session, check_files)
+                if check:
+                    break
+                else:
+                    pass
+
+            # create dispense commands
+            try:
+                fill_out_tasks = [None] * PUMP_SETTINGS['smoothie_num']
+                check_files = [None] * PUMP_SETTINGS['smoothie_num']
+                fill_out_results = []
+                while True:
+                    for smoothie in range(PUMP_SETTINGS['smoothie_num']):
+                        gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'fill_tubing_out.gcode')
+                        fill_out_tasks[smoothie] = post_gcode_async(session, gcode_path, smoothie)
+                        check_files[smoothie] = gcode_path
+
+                    fill_out_results = await asyncio.gather(*fill_out_tasks)
+                    if fill_out_results[0] == 'retry':
+                        pass
+                    else:
+                        break
+                logger.debug('filling out tubing for %s', (print_string))
+
+            except Exception as e:
+                logger.warning('error filling out tubing')
+                stop_robotics()
+                await session.close()
+                return
+
+            # verify that dispense commands are executed
+            commands_complete = 0
+            for result in fill_out_results:
+                if result['done'] == True:
+                    commands_complete = commands_complete + 1
+
+            # verify that syringe_pumps are ready to recieve future commands
+            if commands_complete == len(fill_out_tasks):
+                while True:
+                    check = await check_status(session, check_files)
+                    if check:
+                        break
+                    else:
+                        pass
+            else:
+                logger.warning('cant validate that filling out tasks for %s were comleted', (print_string))
+                stop_robotics()
+                await session.close()
+                return 'cant validate that filling out tasks for {0} were completed'.format(print_string)
+        else:
+            logger.warning('cant validate that filling in tasks for %s were comleted', (print_string))
+            stop_robotics()
+            await session.close()
+            return 'cant validate that filling in tasks for {0} were comleted'.format(print_string)
+        
+        ROBOTICS_STATUS['mode'] = 'idle'
+        await session.close()
+        return 'fill tubing cycle success'
 
 async def dilutions_helper(data):
     """ Main method for dilution routine for specified quads. Called every time eVOLVER client sends dilutions command to Robotics server """
 
     global ROBOTICS_STATUS, EVOLVER_NS
-    
-    syringe_pump_commands = data['message']['syringe_pump_message']
-    ipp_effux_command = data['message']['ipp_efflux_message']
-    
-    # update status    
-    ROBOTICS_STATUS = {
-        "operation": "influx",
-        "active_quad": None,
-        "active_vials": None
-    }
-    
-    # start asyncio Client Session
-    session = aiohttp.ClientSession()
+    if ROBOTICS_STATUS['mode'] == 'idle':
+        syringe_pump_commands = data['message']['syringe_pump_message']
+        ipp_effux_command = data['message']['ipp_efflux_message']
+        
+        # update status    
+        ROBOTICS_STATUS['mode'] = 'influx'
+        
+        # start asyncio Client Session
+        session = aiohttp.ClientSession()
 
-    # get vial coordinates from calibrations
-    f1 = open(ROBOTICS_CALIBRATION_PATH)
-    coordinate_config = json.load(f1)
-    f1.close()
-
-    # load in current config
-    with open(ROBOTICS_CONFIG_PATH,'r') as conf:
-        robotics_conf = yaml.safe_load(conf)
-    PUMP_SETTINGS = robotics_conf['pump_settings']
-
-    # loop through vials and execute fluidic events
-    for quad_name in data['active_quads']:
-        ROBOTICS_STATUS['active_quad'] = quad_name
-        # create data structure to map fluidic events
+        # get calibrated smart quad coordinates from config
+        with open(ROBOTICS_CONFIG_PATH,'r') as conf:
+            robotics_conf = yaml.safe_load(conf)
+        
+        PUMP_SETTINGS = robotics_conf['pump_settings']
         vial_map = [[0,1,2,3,4,5], [11,10,9,8,7,6], [12,13,14,15,16,17]]
-        change_row = False
 
-        for row_num in range(len(vial_map)):
-            row = vial_map[row_num]
+        # loop through sets of vials (vial_window) and execute fluid dispension events
+        for quad_name in data['active_quads']:
+            ROBOTICS_STATUS['active_quad'] = quad_name
+            current_coordinates = [-18,36]
+            change_row = False
 
-            # get list of pumps from server_conf.yml
-            pump_map = []
-            for pump_id in range(PUMP_SETTINGS['pump_num']):
-                for pump in PUMP_SETTINGS['pumps']:
-                    if PUMP_SETTINGS['pumps'][pump]['id'] == pump_id:
-                        pump_map.append(pump)
-                        break
+            # calculate euclidean transformation matrix to convert vial_coordinates into arm coordinates using homing calibration
+            # home based on first two and last two vials
+            vial_1_out = np.array([robotics_conf['homing_coordinates'][quad_name]['vial_1']['x_out'], robotics_conf['homing_coordinates'][quad_name]['vial_1']['y']])
+            vial_1_in = np.array([robotics_conf['homing_coordinates'][quad_name]['vial_1']['x_in'], robotics_conf['homing_coordinates'][quad_name]['vial_1']['y']])
 
-            if row_num % 2 > 0:
-                pump_map.reverse()
+            vial_17_out = np.array([robotics_conf['homing_coordinates'][quad_name]['vial_17']['x_out'], robotics_conf['homing_coordinates'][quad_name]['vial_17']['y']])
+            vial_17_in = np.array([robotics_conf['homing_coordinates'][quad_name]['vial_17']['x_in'], robotics_conf['homing_coordinates'][quad_name]['vial_17']['y']])            
+            
+            z = np.array([robotics_conf['homing_coordinates'][quad_name]['vial_1']['z_out'], robotics_conf['homing_coordinates'][quad_name]['vial_1']['z_in']])        
+        
+            vial_coordinates = np.array([[0, 36], [90, 0]])
+            calibrated_coordinates_out = np.array([vial_1_out, vial_17_out])
+            calibrated_coordinates_in = np.array([vial_1_in, vial_17_in])
+        
+            transform_matrix_out = rigid_transform(vial_coordinates, calibrated_coordinates_out)
+            transform_matrix_in = rigid_transform(vial_coordinates, calibrated_coordinates_in)
+            transform_matrices = np.stack((transform_matrix_out, transform_matrix_in))
 
-            # number of fluidic events based on number of pumps
-            number_events = 6 + (PUMP_SETTINGS['pump_num'] - 1)
-            active_vials = []
-            active_pumps = []
+            for row_num in range(np.size(vial_map, 0)):
+                current_vial_row = vial_map[row_num]
 
-            for event_num in range(number_events):
-                # get list of vials and active pumps for current fluidic event
-                if event_num < PUMP_SETTINGS['pump_num']:
-                    active_vials.append(row[event_num])
-                    active_pumps.append(pump_map[event_num])
-                if event_num >= PUMP_SETTINGS['pump_num']:
-                    active_vials.pop(0)
-                    if event_num < len(row):
-                        active_vials.append(row[event_num])
-                    if event_num >= len(row):
-                        active_pumps.pop(0)
-
-                logger.info('active vials for fluidic event %d are: %s', event_num, active_vials)
-                logger.info('active pumps for fluidic event %d are: %s', event_num, active_pumps)
-
-                # using dilutions data strcuture, write gcode files to handle dilution events for active vials
-                instructions = {}
-                ROBOTICS_STATUS["active_vials"] = active_vials
-                for i in range(len(active_vials)):
-                    # for current vial, get cogante pump and steps
-                    active_vial_name = 'vial_{0}'.format(active_vials[i])
-                    active_pump = active_pumps[i]
-                    pump_steps = syringe_pump_commands[active_pump][quad_name][active_vial_name]
-                    instructions[active_pump] = pump_steps
-                write_gcode('volume_in', instructions)
-                write_gcode('volume_out', instructions)
-                
-                # get gcode files for active vials
-                print_string = ''
-                for i in range(len(active_vials)):
-                    print_string = print_string + 'vial_{0} '.format(active_vials[i])
-                print_string = print_string + 'in {0}'.format(quad_name)
-
-                # create tasks for fluidic input events
-                try:
-                    fluidic_results = []
-                    skip = False
-                    arm_move_result = []
-                    while True:
-                        fluidic_tasks = []
-                        check_files = []
-                        for smoothie in range(PUMP_SETTINGS['smoothie_num']):
-                            gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'volume_in.gcode')
-                            fluidic_tasks.append(post_gcode_async(session, gcode_path, smoothie))
-                            check_files.append(gcode_path)
-                        if skip == False:
-                            fluidic_tasks.append(pipette_next_step(row_num, quad_name, change_row, coordinate_config))
-
-                        fluidic_results = await asyncio.gather(*fluidic_tasks)
-                        if 'retry' in fluidic_results:
-                            if fluidic_results[-1][0] == 'arm_moved':
-                                skip = True
-                                arm_move_result = fluidic_results[-1]
-                            time.sleep(0.1)
-                            continue
-                        else:
-                            if skip:
-                                fluidic_results.append(arm_move_result)
+                # get list of pumps from server_conf.yml
+                pump_map = []
+                for pump_id in range(PUMP_SETTINGS['pump_num']):
+                    for pump in PUMP_SETTINGS['pumps']:
+                        if PUMP_SETTINGS['pumps'][pump]['id'] == pump_id:
+                            pump_map.append(pump)
                             break
-                    logger.debug('pumping in dilution volume for: %s', (print_string))
 
-                except Exception as e:
-                    logger.warning('error pumping in dilution volume: %s', (e))
-                    ROBOTICS_STATUS["operation"] = 'error'
-                    await session.close()
-                    return e
+                # flip pump map to account for leading pump position changing in middle row of quad
+                if current_coordinates[1] == 18:
+                    pump_map.reverse()
 
-                # verify that robotic pipette has executed input events and update arm coordinate configurations
-                tasks_complete = 0
-                if fluidic_results[-1][0] == 'arm_moved':
-                    tasks_complete = tasks_complete + 1
-                    coordinate_config = fluidic_results[-1][1]
-                for result in fluidic_results[0:-1]:
-                    if result['done'] == True:
-                        tasks_complete = tasks_complete + 1
+                # number of active vial sets
+                num_vial_sets = 6 + (PUMP_SETTINGS['pump_num'] - 1)
+                vial_window = []
+                active_pumps = []
 
-                # check status of pumps before moving to output events
-                if tasks_complete == len(fluidic_results):
-                    while True:
-                        check = await check_status(session, check_files)
-                        if check:
-                            break
-                        else:
-                            pass
+                # update vial window (set of vials in which arm is physically above). 
+                # Vial window essentially behaves like a queue data structure, where vials are first in, first out as arm moves along dilution path
+                for x in range(num_vial_sets):
+                    if x < PUMP_SETTINGS['pump_num']:
+                        vial_window.append(current_vial_row[x])
+                        active_pumps.append(pump_map[x])
+                    if x >= PUMP_SETTINGS['pump_num']:
+                        vial_window.pop(0)
+                        if x < len(current_vial_row):
+                            vial_window.append(current_vial_row[x])
+                        if x >= len(current_vial_row):
+                            active_pumps.pop(0)
 
-                    # create tasks for fluidic output events
+                    logger.info('current vial window is: %s', vial_window)
+                    logger.info('active pumps for current vial window is: %s', active_pumps)
+
+                    # using dilutions data strcuture, write gcode files to handle fluid dispension events for vial window
+                    instructions = {}
+                    ROBOTICS_STATUS['vial_window'] = vial_window
+                    for i in range(len(vial_window)):
+                        # for current vial, get cogante pump and steps
+                        active_vial_name = 'vial_{0}'.format(vial_window[i])
+                        active_pump = active_pumps[i]
+                        pump_steps = syringe_pump_commands[active_pump][quad_name][active_vial_name]
+                        instructions[active_pump] = pump_steps
+                    write_gcode('volume_in', instructions)
+                    write_gcode('volume_out', instructions)
+                    
+                    # get gcode files for vials in vial window
+                    print_string = ''
+                    for i in range(len(vial_window)):
+                        print_string = print_string + 'vial_{0} '.format(vial_window[i])
+                    print_string = print_string + 'in {0}'.format(quad_name)
+
+                    # create pre-dispense commands
                     try:
-                        fluidic_results = []
+                        pre_dispense_results = []
+                        skip = False
+                        arm_move_result = []
                         while True:
                             fluidic_tasks = []
                             check_files = []
                             for smoothie in range(PUMP_SETTINGS['smoothie_num']):
-                                gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'volume_out.gcode')
+                                gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'volume_in.gcode')
                                 fluidic_tasks.append(post_gcode_async(session, gcode_path, smoothie))
                                 check_files.append(gcode_path)
-                            
-                            fluidic_results = await asyncio.gather(*fluidic_tasks)
-                            if 'retry' in fluidic_results:
+                            if skip == False:
+                                fluidic_tasks.append(snake_path_step(current_coordinates, change_row, transform_matrices, z))
+
+                            pre_dispense_results = await asyncio.gather(*fluidic_tasks)
+                            if 'retry' in pre_dispense_results:
+                                if pre_dispense_results[-1][0] == 'arm_moved':
+                                    skip = True
+                                    arm_move_result = pre_dispense_results[-1]
                                 time.sleep(0.1)
                                 continue
                             else:
+                                if skip:
+                                    pre_dispense_results.append(arm_move_result)
                                 break
-                        logger.debug('pumping out dilution volume for: %s', (print_string))
-
+                        logger.debug('pumping in dilution volume for: %s', (print_string))
                     except Exception as e:
-                        logger.warning('error pumping out dilution volume')
-                        ROBOTICS_STATUS["operation"] = 'error'
+                        logger.error('error pumping in dilution volume: %s', (e))
+                        stop_robotics()
                         await session.close()
-                        return e
+                        return
 
-                    # verify that arm has completed fluidic output events
-                    tasks_complete = 0
-                    for result in fluidic_results:
+                    # verify that arm and syringe pumps executed pre-dispense commands
+                    commands_complete = 0
+                    if pre_dispense_results[-1][0] == 'arm_moved':
+                        commands_complete = commands_complete + 1
+                        current_coordinates = pre_dispense_results[-1][1]
+                    for result in pre_dispense_results[0:-1]:
                         if result['done'] == True:
-                            tasks_complete = tasks_complete + 1
+                            commands_complete = commands_complete + 1
 
-                    # check status of pumps before moving to dilution events
-                    if tasks_complete == len(fluidic_results):
+                    # verify that syringe_pumps are ready to receive dispense commands
+                    if commands_complete == len(pre_dispense_results):
                         while True:
                             check = await check_status(session, check_files)
                             if check:
                                 break
                             else:
                                 pass
-                        logger.debug('finished dilution routine for: %s', (print_string))
 
+                        # create dispense commands
+                        try:
+                            dispense_results = []
+                            while True:
+                                fluidic_tasks = []
+                                check_files = []
+                                for smoothie in range(PUMP_SETTINGS['smoothie_num']):
+                                    gcode_path = os.path.join(PUMP_SETTINGS['smoothies'][smoothie]['gcode_path'], 'volume_out.gcode')
+                                    fluidic_tasks.append(post_gcode_async(session, gcode_path, smoothie))
+                                    check_files.append(gcode_path)
+                                
+                                dispense_results = await asyncio.gather(*fluidic_tasks)
+                                if 'retry' in dispense_results:
+                                    time.sleep(0.1)
+                                    continue
+                                else:
+                                    break
+                            logger.debug('pumping out dilution volume for: %s', (print_string))
+                        except Exception as e:
+                            logger.error('error pumping out dilution volume: %s' % (e))
+                            stop_robotics()
+                            await session.close()
+                            return
 
+                        # verify that syringe pumps are ready to receive future commands
+                        commands_complete = 0
+                        for result in dispense_results:
+                            if result['done'] == True:
+                                commands_complete = commands_complete + 1
+
+                        if commands_complete == len(dispense_results):
+                            while True:
+                                check = await check_status(session, check_files)
+                                if check:
+                                    break
+                                else:
+                                    pass
+                            logger.debug('finished dilution routine for: %s', (print_string))
+                        else:
+                            logger.error('cant validate that dilution volumes were pumped out for: %s', (print_string))
+                            stop_robotics()
+                            await session.close()
+                            return
                     else:
-                        logger.warning('cant validate that dilution volumes were pumped out for: %s', (print_string))
-                        ROBOTICS_STATUS["operation"] = 'error'
+                        logger.error('cant validate that dilution volumes were pumped in or that arm was moved to proper location for: %s', (print_string))
+                        stop_robotics()
                         await session.close()
-                        return 'cant validate that dilution volumes were pumped out for: {0}'.format(print_string)
-                else:
-                    logger.warning('cant validate that dilution volumes were pumped in or that arm was moved to proper location for: %s', (print_string))
-                    ROBOTICS_STATUS["operation"] = 'error'
-                    await session.close()
-                    return 'cant validate that dilution volumes were pumped in and arm moved to proper location for: {0}'.format(print_string)
+                        return
 
-                # end of fluidic event
-                change_row = False
+                    # finished dilutions for current vial_window, moving to next set of vials
+                    change_row = False
 
-            # reached end of row, increment arm coordinates to change row
-            change_row = True
+                # change row
+                change_row = True
 
-        # reached end of fluidic events for quad, move arm up before moving to next quad
-        coordinates = {'x': coordinate_config[quad_name]['x_out'], 'y': coordinate_config[quad_name]['y'], 'z': coordinate_config[quad_name]['z_out']}
-        await move_arm(coordinates, True)
+            # reached end of dilution events for quad, move arm up before moving to next quad
+            arm_coordinates_out = np.dot(transform_matrices[0], np.array([[current_coordinates[0]], [current_coordinates[1]], [1]]))
+            await move_arm({'x': arm_coordinates_out[0][0], 'y': arm_coordinates_out[1][0], 'z': z[0]}, True)
+            
+            # send efflux command to continue IPPs for x amount of time
+            EVOLVER_NS.fluid_command(ipp_effux_command)
+
+        ROBOTICS_STATUS['mode'] = 'idle'
+        ROBOTICS_STATUS['vial_window'] = None
+        ROBOTICS_STATUS['active_quad'] = None
         
-        # send efflux command to continue IPPs for x amount of time
-        EVOLVER_NS.fluid_command(ipp_effux_command)
+        await session.close()
+        return 'dilution routine success'
 
-    ROBOTICS_STATUS = {
-        "operation": 'idle',
-        "active_quad": None,
-        "active_vials": None
-    }
-    
-    await session.close()
-    return 'dilution routine success'
+def rigid_transform(quad_coordinates, arm_coordinates):
+    tform = ski.transform.EuclideanTransform()
+    tform.estimate(quad_coordinates,arm_coordinates)
+    return tform
 
-## ## This script is to define xarm related functions that are not covered by auto-generated blockly functions. Useful for more precise movements.
 async def move_arm(coordinates, wait):
-    """ Return string indicating that arm was moved to specified XYZ location in space """
+    """ Move arm to desired XYZ coordinates """
+
+    global ROBOTICS_STATUS
     x = coordinates['x']
     y = coordinates['y']
     z = coordinates['z']
@@ -686,54 +713,68 @@ async def move_arm(coordinates, wait):
 
     # move xARM to specified coordinates
     try:
-        if arm.error_code == 0 and not params['quit']:
+        if ROBOTICS_STATUS['xArm']['error_code'] == 0:
             await asyncio.sleep(0.5)
             return arm.set_position(x=x, y=y, z=z, roll=user_params['roll'], pitch=user_params['pitch'], yaw=user_params['yaw'], speed=user_params['speed'], mvacc=user_params['mvacc'], wait=wait)
     except:
         logger.warning('error moving arm')
+        stop_robotics()
+        return 1
 
+async def snake_path_step(current_coordinates, change_row, transform_matrices, z):
+    """ Program arm to exit current vial_window and move to next set of vials. Returns string indicating that arm was succesfully moved """
+    phase_1 = None
+    row_logic = 1
+    
+    if current_coordinates[1] == 18:
+        row_logic = -1
+    
+    # phase 1 coordinates (move arm up)
+    x1_out = current_coordinates[0]
+    y1_out = current_coordinates[1]
+    
+    # phase 2 coordinates (move arm above next vial window)
+    # if end of row is reached move arm to next row
+    x2_out = None
+    y2_out = None
+    if change_row:
+        x2_out = x1_out
+        y2_out = y1_out - 18
+    else:
+        x2_out = x1_out + row_logic*18 # subtract if in middle row, add if in first or third
+        y2_out = y1_out
 
-async def pipette_next_step(row_num, quad_name, change_row, coordinate_config):
-    arm_location = {}
-    part1 = None
-    part2 = None
+    # phase 3 coordinates (move arm into next vial window)
+    x3_in = x2_out
+    y3_in = y2_out
 
-    # move arm up
-    arm_location['x'] = coordinate_config[quad_name]['x_out']
-    arm_location['y'] = coordinate_config[quad_name]['y']
-    arm_location['z'] = coordinate_config[quad_name]['z_out']
-    part1 = await move_arm(arm_location, False)
+    next_coordinates_out = np.array([[x1_out, x2_out], [y1_out, y2_out], [1,1]])
+    next_coordinates_in = np.array([[x3_in], [y3_in], [1]])
 
-    if part1 == 0:
-        # move arm above next set of active_vials
-        if change_row:
-            coordinate_config[quad_name]['x_in'] = coordinate_config[quad_name]['x_in'] + 18
-            coordinate_config[quad_name]['x_out'] = coordinate_config[quad_name]['x_out'] + 18
-            arm_location['x'] = coordinate_config[quad_name]['x_out']
-            part2 = await move_arm(arm_location, False)
-        else:
-            if row_num % 2 == 0:
-                coordinate_config[quad_name]['y'] = coordinate_config[quad_name]['y'] + 18
-                arm_location['y'] = coordinate_config[quad_name]['y']
-            else:
-                coordinate_config[quad_name]['y'] = coordinate_config[quad_name]['y'] - 18
-                arm_location['y'] = coordinate_config[quad_name]['y']
-            part2 = await move_arm(arm_location, False)
+    # transform vial coordinates into arm coordinates for each phase
+    arm_coordinates_out = np.dot(transform_matrices[0], next_coordinates_out)
+    arm_coordinates_in = np.dot(transform_matrices[1], next_coordinates_in)
 
-        if part2 == 0:
-            # move arm down into next set of active_vials
-            arm_location['x'] = coordinate_config[quad_name]['x_in']
-            arm_location['z'] = coordinate_config[quad_name]['z_in']
-            await move_arm(arm_location, True)
+    # move arm to next vial window using transformed vial coordinates
+    phase_1 = await move_arm({'x': arm_coordinates_out[0][0], 'y': arm_coordinates_out[1][0], 'z': z[0]}, True)
 
-    return ['arm_moved', coordinate_config]
+    if phase_1 == 0:
+        phase_2 = await move_arm({'x': arm_coordinates_out[0][1], 'y': arm_coordinates_out[1][1], 'z': z[0]}, True)
+    if phase_2 == 0:
+        await move_arm({'x': arm_coordinates_in[0][0], 'y': arm_coordinates_in[1][0], 'z': z[1]}, True)
+
+    # return new vial coordinates
+    current_coordinates = np.array([x3_in, y3_in])
+    return ['arm_moved', current_coordinates]
 
 async def broadcast():
     global ROBOTICS_STATUS
     logging.info('Robotics status broadcast %s' % (ROBOTICS_STATUS))
     await sio.emit('broadcast', ROBOTICS_STATUS, namespace = '/robotics')
 
-## This script is to define all API calls to the flask server. Ensure that functions called in routes exist are pulled ./functions or ./manual
+# END OF SERVER FUNCTIONS #
+
+# SERVER EVENT HANDLER FUNCTIONS #
 @sio.on('connect', namespace = '/robotics')
 async def on_connect(sid, environ):
     logger.info('dpu connected to robotics_eVOLVER server')
@@ -749,41 +790,9 @@ async def on_get_pump_settings(sid, data):
     logger.info("Retreiving pump settings...")
     await sio.emit('active_pump_settings', data, namespace = '/robotics')
 
-@sio.on('arm_test', namespace = '/robotics')
-async def on_arm_test(sid, data):
-    above_evolver()
-    above_to_zero()
-
-@sio.on('set_arm', namespace = '/robotics')
-async def on_set_arm(sid, data):
-    above_evolver()
-    time.sleep(1)
-
-@sio.on('reset_arm', namespace = '/robotics')
-async def on_reset_arm(sid, data):
-    above_to_zero()
-    time.sleep(1)
-
-@sio.on('move_to_quad', namespace = '/robotics')
-async def on_move_to_quad(sid, data):
-    quad = data['quad']
-    if quad == 0:
-        logger.info('moving to smart quad 0')
-        quad_0_location()
-    if quad == 1:
-        logger.info('moving to smart quad 1')
-        quad_1_location()
-    if quad == 2:
-        logger.info('moving to smart quad 2')
-        quad_2_location()
-    if quad == 3:
-        logger.info('moving to smart quad 3')
-        quad_3_location()
-    time.sleep(1)
-
 @sio.on('fill_tubing', namespace = '/robotics')
 async def on_fill_tubing(sid, data):
-    """ Fill fluidic tubing lines. Run prior to using robotics system """
+    """ Fill tubing lines. Run prior to using robotics system """
     sio.start_background_task(fill_tubing_helper)
     logger.info('Filling syringe pump tubing')
 
@@ -803,3 +812,28 @@ async def on_dilutions(sid, data):
 async def on_request_robotics_status(sid, data):
     logger.info('Retreiving active robotics status...')
     await sio.emit('active_robotics_status', ROBOTICS_STATUS, namespace = '/robotics')
+
+@sio.on('override_robotics_status', namespace = '/robotics')
+async def on_override_robotics_status(sid, data):
+    """ Override ROBOTICS_STATUS """
+    if len(data['parameters']) > 2:
+        logger.warning('Incorrect number of parameters passed - try again.')
+        return
+    if 'xArm' in data['parameters']:
+        logger.info('Overriding robotics status...')
+        ROBOTICS_STATUS['xArm'][data['parameters'][1]] = data['value']
+        return
+    if 'syringe_pump' in data['parameters']:
+        logger.info('Overriding robotics status...')
+        ROBOTICS_STATUS['syringe_pumps'][data['parameters'][1]] = data['value']
+        return
+    ROBOTICS_STATUS[data['parameters']] = data['value']
+
+@sio.on('stop_robotics', namespace = '/robotics')
+async def on_stop_robotics(sid, data):
+    """ Emergency stop all robotics """
+    stop_robotics()
+
+
+
+

@@ -78,7 +78,7 @@ if __name__ == '__main__':
                 bloop.run_until_complete(robotics_server.broadcast())
                 bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, tag))
                 logger.debug("Pre-Data Broadcast Sent!")
-                time.sleep(5)
+                time.sleep(2)
 
                 logger.debug("Running True Broadcast!")
                 bloop.run_until_complete(evolver_server.broadcast(commands_blank, ''))

@@ -25,3 +25,5 @@ If you desire to update an older evolvers calibrations to the current release fo
 ``python3.6 utils/calibration_transformation.py -d evolver/calibrations -f evolver/calibrations.json``
 
 
+setup systemctl for ht_evolver.service
+https://learn.sparkfun.com/tutorials/how-to-run-a-raspberry-pi-program-on-startup/all
