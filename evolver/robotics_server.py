@@ -20,6 +20,11 @@ class RoboticsError(Exception):
         logger.error('RoboticsError Found: %s' % message)
         stop_robotics()
 
+class FluidicEventError(Exception):
+    def __init__(self, message):
+        self.message = message
+        logger.error('FluidicEventError Found: %s' % message)
+
 # define namespace events to communicate with eVOLVER server
 class EvolverNamespace(socketio.ClientNamespace):
     def on_connect(self, *args):
@@ -261,7 +266,6 @@ async def post_gcode_async(session, gcode_path, smoothie):
     finally:
         return {'result': result}
 
-
 async def check_job(session, smoothie):
     """ Return completion status of syringe pump actuation via GET request to Ocotprint server """
     
@@ -329,7 +333,7 @@ async def fluidic_event(session, gcode_files, mode, arm_settings = {}, print_str
 
             aspirate_results = await asyncio.gather(*fluidic_tasks, return_exceptions=True)
             if any([ ('done', 'Kill') in dict['result'].items() for dict in aspirate_results ]):
-                raise RoboticsError('kill command from arm_path() detected, exiting routine')
+                raise FluidicEventError('kill command from arm_path() detected, exiting routine')
             elif any([ ('done', False) in dict['result'].items() for dict in aspirate_results ]):
                 if aspirate_results[-1]['result']['done']:
                     skip_arm = True
@@ -342,10 +346,9 @@ async def fluidic_event(session, gcode_files, mode, arm_settings = {}, print_str
         logger.info('running aspiration in %s mode for: %s' % (mode, print_string))
     
     except Exception as e:
-        await session.close()
         logger.error('error running aspiration in %s mode' % (mode))
-        logger.exception(e)
-        return {'result': {'done':False}}
+        raise e
+        #return {'result': {'done':False}}
 
     else:
         # verify that arm and syringe pumps executed aspiration commands
@@ -382,10 +385,9 @@ async def fluidic_event(session, gcode_files, mode, arm_settings = {}, print_str
                 logger.info('running dispense during %s for: %s' % (mode, print_string))
             
             except Exception as e:
-                await session.close()
                 logger.error('error running dispense in %s mode, stopping robotics' % (mode))
-                logger.exception(e)
-                return {'result': {'done':False}}
+                raise e
+                #return {'result': {'done':False}}
             
             else:
                 # verify that syringe pumps are ready to receive future commands
@@ -405,11 +407,11 @@ async def fluidic_event(session, gcode_files, mode, arm_settings = {}, print_str
                     logger.info('finished %s for: %s' % (mode, print_string))
                     return {'result': {'done': True}}
                 else:
-                    logger.error('cant validate that volumes were pumped during %s for: %s' % (mode, print_string))
-                    return {'result': {'done':False}}
+                    raise FluidicEventError('cant validate that volumes were pumped during %s for: %s' % (mode, print_string))
+                    #return {'result': {'done':False}}
         else:
-            logger.error('cant validate that volumes were pumped or that arm was moved to proper location during %s for: %s' % (mode, print_string))
-            return {'result': {'done':False}}
+            raise FluidicEventError('cant validate that volumes were pumped or that arm was moved to proper location during %s for: %s' % (mode, print_string))
+            #return {'result': {'done':False}}
 
 async def prime_pumps_helper():
     """ Call this function to prime pumps after filling tubing """
@@ -456,6 +458,7 @@ async def prime_pumps_helper():
         except Exception as e:
             await session.close()
             logger.error('error priming pumps: %s' % e)
+            logger.exception(e)
             return {'result':{'done': False}}
 
         else:
@@ -481,7 +484,7 @@ async def prime_pumps_helper():
             else:
                 await session.close()
                 ROBOTICS_STATUS['mode'] = 'idle'
-                logger.error('error priming syringe pumps, check logs')
+                logger.error('error priming syringe pumps, commands not completed')
                 return {'result':{'done': False}}
 
 async def fill_tubing_helper():
@@ -683,8 +686,9 @@ async def influx_snake_helper(data):
                             await fluidic_event(session, gcode_files, 'influx', arm_settings, print_string)
                         
                         except:
-                            logger.error('error running vial_set dilution in influx_snake_helper, check logs for traceback')
                             await session.close()
+                            logger.error('error running vial_set dilution in influx_snake_helper, check logs for traceback')
+                            logger.exception(e)
                             return {'result': {'done':False}}
                         
                         # check if volume for all vials in current vial window has been dispensing
@@ -703,6 +707,7 @@ async def influx_snake_helper(data):
             try:
                 await move_arm({'x': arm_coordinates_out[0][0], 'y': arm_coordinates_out[1][0], 'z': z_vial_dilution[0]}, True)
             except Exception as e:
+                await session.close()
                 logger.error('error moving arm to up after finishing quad influx_snake function, check logs')
                 logger.exception(e)
                 return {'result': {'done':False}}
