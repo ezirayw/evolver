@@ -25,12 +25,12 @@ experimental_params:
     recurring: true
     fields_expected_outgoing: 2
     fields_expected_incoming: 37
-    value: '100'
+    value: '500'
   od_90_right:
     recurring: true
     fields_expected_outgoing: 2
     fields_expected_incoming: 37
-    value: '100'
+    value: '500'
   syringe_pump:
     recurring: false
     fields_expected_outgoing: 49
@@ -62,7 +62,7 @@ broadcast_tags:
         value: '1'
 
 # eVOLVER server parameter configurations
-broadcast_timing: 45
+broadcast_timing: 20
 num_sleeves: 16
 evolver_port: 8081
 

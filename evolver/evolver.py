@@ -23,10 +23,6 @@ robotics_conf = {}
 EVOLVER_CONF_FILENAME = 'conf.yml'
 ROBOTICS_CONF_FILENAME = 'robotics_server_conf.yml'
 
-def start_background_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
 if __name__ == '__main__':
     # need to get our IP
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -58,35 +54,29 @@ if __name__ == '__main__':
     robotics_server.setup_client(socketIO_eVOLVER)
     socketIO_eVOLVER.connect("http://{0}:{1}".format(evolver_conf['evolver_ip'], evolver_conf['evolver_port']), namespaces=['/dpu-evolver'])
 
-
     # Set up data broadcasting
     bloop = asyncio.new_event_loop()
     last_time = None
-    running = False
     while True:
         current_time = time.time()
-        commands_in_queue = evolver_server.get_num_commands() > 0
-        commands_blank = False
+        evolver_status = evolver_server.get_evolver_status()
 
-        if (last_time is None or current_time - last_time > evolver_conf['broadcast_timing'] or commands_in_queue) and not running:
-            if last_time is None or current_time - last_time > evolver_conf['broadcast_timing']:
-                last_time = time.time()
+        if (last_time is None or current_time - last_time > evolver_conf['broadcast_timing']) and not evolver_status['running_immediate'] and not evolver_status['running_broadcast']:
             try:
-                running = True
-                tag = 'pre_reading'
-                logger.debug("Running Pre-Data Broadcast!")
                 bloop.run_until_complete(robotics_server.broadcast())
-                bloop.run_until_complete(evolver_server.broadcast(commands_in_queue, tag))
-                logger.debug("Pre-Data Broadcast Sent!")
-                time.sleep(2)
+                result = bloop.run_until_complete(evolver_server.broadcast('pre_reading'))
+                if not result:
+                    continue
+                time.sleep(15)
 
-                logger.debug("Running True Broadcast!")
-                bloop.run_until_complete(evolver_server.broadcast(commands_blank, ''))
+                result = bloop.run_until_complete(evolver_server.broadcast(''))
+                if not result:
+                    continue
 
-                tag = 'post_reading'
-                logger.debug("Running Post-Data Broadcast!")
-                bloop.run_until_complete(evolver_server.broadcast(commands_blank, tag))
-                logger.debug("Post-Data Broadcast Sent!")
-                running = False
+                result = bloop.run_until_complete(evolver_server.broadcast('post_reading'))
+                if not result:
+                    continue
             except:
                 pass
+            if last_time is None or current_time - last_time > evolver_conf['broadcast_timing']:
+                last_time = time.time()

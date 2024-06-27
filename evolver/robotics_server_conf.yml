@@ -13,7 +13,7 @@ pump_settings:
   pump_num: 1
   smoothie_num: 1
   priming_steps: 50
-  plunger_speed_in: 15000
+  plunger_speed_in: 11000
   plunger_speed_out: 9000
   smoothies:
     0:
@@ -25,26 +25,33 @@ pump_settings:
     base_media:
       id: 0
       smoothie: 0
+      max_steps: 300
       motor_connections:
-        valve_steps: 30
+        valve_steps: 25
         valve: 'X' # connection stepper motor that controls valve is connected to (either X, Y, Z, E0, E1)
         plunger: 'Y' # connection stepper motor that plunger is connected to (either X, Y, Z, E0, E1)
+      # 700 steps = 1.13mL
+      # 1mL = 619.47 steps
 
 #    selection_media:
  #     id: 1
   #    smoothie: 0
+#      max_steps: 200
+
    #   motor_connections:
     #    valve_steps: -30
      #   valve: 'Z'
       #  plunger: 'E'
 
 # xarm settings
+# 750
+# 1000
 xarm_params:
   roll: 180
   pitch: 0
   yaw: 0
-  speed: 750
-  mvacc: 1000
+  speed: 10
+  mvacc: 50
 
 # octoprint settings
 octoprint_api_key: "B6EE0555EF414DA7B561496C10C4DE25"
@@ -68,30 +75,31 @@ default_arm_positions:
 
 homing_coordinates:
   quad_0:
-    vial_1:
-      x_out: 77
-      x_in: 73
-      y: -470.2
-      z_out: 467
-      z_in: 430 
+    vial_0:
+      x_out: 70
+      x_in: 65
+      y: -472.5
+      z_out: 477
+      z_in: 438
     vial_17:
-      x_out: 112
-      x_in: 108
-      y: -381
+      x_out: 105
+      x_in: 101
+      y: -383
+    wash_station:
+      z_out: 480
+      z_in: 450
 
   quad_1:
     vial_0:
-      x_out: None
-      x_in: None
-      y: None
-      z_out: None
-      z_in: None 
+      x_out: 68.6
+      x_in: 64.9
+      y: -320.5
+      z_out: 459
+      z_in: 427  
     vial_17:
-      x_out: None
-      x_in: None
-      y: None
-      z_out: None
-      z_in: None 
+      x_out: 103.1
+      x_in: 99.7
+      y: -231
 
   quad_2:
     vial_0:

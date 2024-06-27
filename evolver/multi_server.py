@@ -41,8 +41,6 @@ class MultiServer:
 
                 self.loop.create_task(self.start_site(app))
 
-                #names = sorted(str(s.name) for s in runner.sites)
-                #print("======== Running on {} ========".format(', '.join(names)))
                 print('Running app {0}'. format(app_num))
                 app_num += 1
             t = Thread(target = start_background_loop, args = (self.loop,))

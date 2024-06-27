@@ -16,9 +16,11 @@ CALIBRATIONS_FILENAME = "calibrations.json"
 
 evolver_conf = {}
 serial_connection = None
-command_queue = []
 broadcast_options = []
+command_queue = []
 sio = socketio.AsyncServer(async_handlers=True)
+running_immediate = False
+running_broadcast = False
 
 class EvolverSerialError(Exception):
     pass
@@ -33,7 +35,7 @@ async def on_disconnect(sid):
 
 @sio.on('command', namespace = '/dpu-evolver')
 async def on_command(sid, data):
-    global command_queue, evolver_conf
+    global evolver_conf, running_immediate, running_broadcast, command_queue
     logger.info('Received COMMAND')
     param = data.get('param', None)
     value = data.get('value', None)
@@ -63,10 +65,13 @@ async def on_command(sid, data):
         yaml.dump(evolver_conf, ymlfile)
 
     if immediate:
-        clear_broadcast(param)
         command_queue.insert(0, {'param': param, 'value': value, 'type': IMMEDIATE})
-        logger.debug('inserting immediate command into queue: %s', {'param': param, 'value': value, 'type': IMMEDIATE})
-    await sio.emit('commandbroadcast', data, namespace = '/dpu-evolver')
+        logger.info('adding the following immediate command to queue: %s', {'param': param, 'value': value, 'type': IMMEDIATE})
+        if not running_broadcast:
+            logger.info('running the following immediate command: %s', {'param': param, 'value': value, 'type': IMMEDIATE})
+            running_immediate = True
+            await run_commands('', command_queue)
+            running_immediate = False
 
 @sio.on('getconfig', namespace = '/dpu-evolver')
 async def on_getlastcommands(sid, data):
@@ -209,7 +214,6 @@ async def on_getactivecal(sid, data):
 
 @sio.on('getdevicename', namespace = '/dpu-evolver')
 async def on_getdevicename(sid, data):
-    config_path = os.path.join(LOCATION)
     with open(os.path.join(LOCATION, evolver_conf['device'])) as f:
        configJSON = json.load(f)
     await sio.emit('broadcastname', configJSON, namespace = '/dpu-evolver')
@@ -224,16 +228,8 @@ async def on_setdevicename(sid, data):
         f.write(json.dumps(data))
     await sio.emit('broadcastname', data, namespace = '/dpu-evolver')
 
-def clear_broadcast(param=None):
-    """ Removes broadcast commands of a specific param from queue """
-    global command_queue
-    for i, command in enumerate(command_queue):
-        if (command['param'] == param or param is None) and command['type'] == RECURRING:
-            command_queue.pop(i)
-            break
-
-async def run_commands(broadcast_tag):
-    global command_queue, serial_connection
+async def run_commands(broadcast_tag, command_queue):
+    global serial_connection
     data = {}
     while len(command_queue) > 0:
         command = command_queue.pop(0)
@@ -242,7 +238,7 @@ async def run_commands(broadcast_tag):
             if returned_data is not None:
                 data[command['param']] = returned_data
         except (TypeError, ValueError, serial.serialutil.SerialException, EvolverSerialError) as e:
-            logger.error(e)
+            logger.error('EvolverSerialError: %s', e)
     return data
 
 def serial_communication(param, value, comm_type, broadcast_tag):
@@ -258,63 +254,44 @@ def serial_communication(param, value, comm_type, broadcast_tag):
         output.append(evolver_conf[IMMEDIATE])
         logger.debug('serial communication immediate command: %s', output)
 
-    logger.debug('hello')
-    logger.debug('param is: %s' % (param))
     if type(value) is list:
        output = output + list(map(str,value))
-       logger.debug('output type is %s and new output is %s' % (type(value), output))
        for i,command_value in enumerate(output):
-            logger.debug('beeeelp')
             if command_value == 'NaN':
                 if broadcast_tag in broadcast_options:
                     output[i] = evolver_conf['broadcast_tags'][broadcast_tag][param]['value'][i-1]
                 else:
                     output[i] = evolver_conf['experimental_params'][param]['value'][i-1]
-
     else:
         output.append(value)
-        logger.debug('appended output %s and its length %s' % (output, len(output)))
     
-    logger.debug('heddo')
-    logger.debug(output)
     fields_expected_incoming = None
     fields_expected_outgoing = None
-    logger.debug('len(output) is: %s' % (len(output)))
         
     if broadcast_tag in broadcast_options:
         if param in evolver_conf['broadcast_tags'][broadcast_tag]:
-            logger.debug('wtf')
             fields_expected_outgoing = evolver_conf['broadcast_tags'][broadcast_tag][param]['fields_expected_outgoing']
             fields_expected_incoming = evolver_conf['broadcast_tags'][broadcast_tag][param]['fields_expected_incoming']
         if param in evolver_conf['experimental_params']:
-            logger.debug('ewww')
             fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
             fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
     
     else:
-        logger.debug('loser')
         fields_expected_outgoing = evolver_conf['experimental_params'][param]['fields_expected_outgoing']
         fields_expected_incoming = evolver_conf['experimental_params'][param]['fields_expected_incoming']
         logger.debug(fields_expected_incoming)
         logger.debug(fields_expected_outgoing)
     
     if len(output) is not fields_expected_outgoing:
-        logger.warning('EvolverSerialError')
-        logger.warning('Error: Number of fields outgoing for ' + param + ' different from expected\n\tExpected: ' + str(fields_expected_outgoing) + '\n\tFound: ' + str(len(output)))
-
-    logger.debug('bye')
+        raise ('Error: Number of fields outgoing for ' + param + ' different from expected\n\tExpected: ' + str(fields_expected_outgoing) + '\n\tFound: ' + str(len(output)))
 
     # Construct the actual string and write out on the serial buffer
     serial_output = param + ','.join(output) + ',' + evolver_conf['serial_end_outgoing']
-    logger.debug(serial_output)
     serial_connection.write(bytes(serial_output, 'UTF-8'))
     time.sleep(evolver_conf['serial_delay'])
 
-    logger.debug('whatsup')
-
     # Read and process the response
     response = serial_connection.readline().decode('UTF-8', errors='ignore')
-    logger.debug(response)
     address = response[0:len(param)]
     if address != param:
         raise EvolverSerialError('Error: Response has incorrect address.\n\tExpected: ' + param + '\n\tFound:' + address)
@@ -362,36 +339,46 @@ def attach(app, conf):
     # Set up the serial comms
     serial_connection = serial.Serial(port=evolver_conf['serial_port'], baudrate = evolver_conf['serial_baudrate'], timeout = evolver_conf['serial_timeout'])
 
-def get_num_commands():
-    global command_queue
-    return len(command_queue)
+def get_evolver_status():
+    global running_immediate, running_broadcast
+    return {'running_immediate': running_immediate, 'running_broadcast': running_broadcast}
 
-async def broadcast(commands_in_queue, broadcast_tag):
-    global command_queue, broadcast_options
+async def broadcast(broadcast_tag):
+    global broadcast_options, running_immediate, running_broadcast, command_queue
+    if running_immediate:
+        return False
+    running_broadcast = True
     broadcast_data = {}
-    clear_broadcast()
+
+    # Run any IMMEDIATE commands in queue
+    if len(command_queue) > 0:
+        logger.info('Running IMMEIDATE commands in command queue')
+        await run_commands(broadcast_tag, command_queue)
+    
     for broadcast_option in list(evolver_conf['broadcast_tags'].keys()):
         broadcast_options.append(broadcast_option)
-    if not commands_in_queue:
-        if broadcast_tag in broadcast_options:
-            for param, config in evolver_conf['broadcast_tags'][broadcast_tag].items():
-                if config['recurring']:
-                    command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
-        else:
-            for param, config in evolver_conf['experimental_params'].items():
-                if config['recurring']:
-                    command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
-    # Always run commands so that IMMEDIATE requests occur. RECURRING requests only happen if no commands in queue
-    broadcast_data['data'] = await run_commands(broadcast_tag)
+    if broadcast_tag in broadcast_options:
+        for param, config in evolver_conf['broadcast_tags'][broadcast_tag].items():
+            if config['recurring']:
+                command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
+    else:
+        for param, config in evolver_conf['experimental_params'].items():
+            if config['recurring']:
+                command_queue.append({'param': param, 'value': config['value'], 'type':RECURRING})
+    
+    # Run RECURRING commands
+    broadcast_data['data'] = await run_commands(broadcast_tag, command_queue)
+
+    # Build broadcast message
     if broadcast_tag in broadcast_options:
         broadcast_data['config'] = evolver_conf['broadcast_tags'][broadcast_tag]
         broadcast_data['dummy'] = True
     else:
         broadcast_data['config'] = evolver_conf['experimental_params']
-
-
-    if not commands_in_queue:
-        broadcast_data['ip'] = evolver_conf['evolver_ip']
-        broadcast_data['timestamp'] = time.time()
-        logging.info('Broadcasting data %s', (broadcast_data))
-        await sio.emit('broadcast', broadcast_data, namespace='/dpu-evolver')
+    
+    broadcast_data['ip'] = evolver_conf['evolver_ip']
+    broadcast_data['timestamp'] = time.time()
+    logging.info('Broadcasting data %s', (broadcast_data))
+    await sio.emit('broadcast', broadcast_data, namespace='/dpu-evolver')
+    running_broadcast = False
+    return True
