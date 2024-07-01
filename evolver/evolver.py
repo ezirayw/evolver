@@ -40,7 +40,11 @@ if __name__ == '__main__':
     robotics_conf['evolver_ip'] = evolver_ip
     robotics_conf['evolver_port'] = evolver_conf['evolver_port']
 
-    # Set up the server
+    # Set up the robotics_server before adding to MultiServer
+    robotics_server = robotics_server.RoboticsServer()
+    robotics_server.register_callback()
+    robotics_server.setup_event_handlers()
+
     server_loop = asyncio.new_event_loop()
     ms = MultiServer(loop=server_loop)
     app1 = ms.add_app(port = evolver_conf['evolver_port'])
@@ -49,10 +53,18 @@ if __name__ == '__main__':
     robotics_server.attach(app2)
     ms.run_all()
 
-    # Set up client
+    # Set up the robotics_server as an eVOLVER client
     socketIO_eVOLVER = socketio.Client(logger=True, engineio_logger=True)
     robotics_server.setup_client(socketIO_eVOLVER)
-    socketIO_eVOLVER.connect("http://{0}:{1}".format(evolver_conf['evolver_ip'], evolver_conf['evolver_port']), namespaces=['/dpu-evolver'])
+    connected = False
+    while not connected:
+        try:
+            socketIO_eVOLVER.connect("http://{0}:{1}".format(evolver_conf['evolver_ip'], evolver_conf['evolver_port']), namespaces=['/dpu-evolver'])
+            connected = True
+            logger.info('Connected to eVOLVER server')
+        except:
+            logger.info('Failed to connect to eVOLVER server. Retrying in 0.5 seconds.')
+            time.sleep(0.5)
 
     # Set up data broadcasting
     bloop = asyncio.new_event_loop()

@@ -9,7 +9,7 @@ headers:
 robotics_port: 8080 # port for fluidics server
 
 # Syringe pump settings
-pump_settings:
+pump_conf:
   pump_num: 1
   smoothie_num: 1
   priming_steps: 50
@@ -50,8 +50,8 @@ xarm_params:
   roll: 180
   pitch: 0
   yaw: 0
-  speed: 10
-  mvacc: 50
+  speed: 500
+  mvacc: 500
 
 # octoprint settings
 octoprint_api_key: "B6EE0555EF414DA7B561496C10C4DE25"
@@ -76,15 +76,15 @@ default_arm_positions:
 homing_coordinates:
   quad_0:
     vial_0:
-      x_out: 70
-      x_in: 65
-      y: -472.5
-      z_out: 477
-      z_in: 438
+      x_out: 78.5
+      x_in: 74.5
+      y: -470
+      z_out: 470
+      z_in: 431
     vial_17:
-      x_out: 105
-      x_in: 101
-      y: -383
+      x_out: 114
+      x_in: 110
+      y: -380
     wash_station:
       z_out: 480
       z_in: 450
