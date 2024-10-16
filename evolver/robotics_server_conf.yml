@@ -1,30 +1,34 @@
 ---
 # network settings
 xarm_ip: "192.168.1.200"
-headers:
-    Content-Type: "application/json"
-    Authorization: "Basic azI6cENoM0hoTGhIeU1xdzJaRVk2VXJYcW9NOWVVKg=="
-    cache-control: "no-cache"
-    Postman-Token: "b1dd33bd-212f-4042-9877-e959e3f90a59"
+evolver_ip: "192.168.1.15"
 robotics_port: 8080 # port for fluidics server
+check_status_timout: 20 # timeout for check_status requests, needs to be larger than OctoPrint timeout
+post_request_timeout: 5 # timeout for post_gcode requests
 
-# Syringe pump settings
+# Efflux IPP settings
+efflux_priming_settings:
+  frequenzy: 1 # Hz
+  time: 30 # seconds
+  ipp_addresses:
+    quad_0: [16, 17, 18]
+    quad_1: [19, 20, 21]
+    quad_2: [24, 25, 26]
+    quad_3: [27, 28, 29]
+
+# Influx syringe pump settings
 pump_conf:
   pump_num: 1
-  smoothie_num: 1
-  priming_steps: 50
-  plunger_speed_in: 11000
-  plunger_speed_out: 9000
-  smoothies:
-    0:
-      serial_port: '/dev/ttyACM0' # serial port smoothieboard is connected to on evolver raspberry pi
-      serial_baudrate: '115200'
-      gcode_path: "/home/pi/gcode_files/smoothie0"
-      port: 5000
+  octoprint_instance_num: 1
+  priming_steps: 75
+  plunger_speed_in: 10000
+  plunger_speed_out: 5000
+
   pumps:
-    base_media:
+    base_media_0:
       id: 0
-      smoothie: 0
+      type: 'media'
+      octoprint_id: 0
       max_steps: 300
       motor_connections:
         valve_steps: 25
@@ -35,13 +39,22 @@ pump_conf:
 
 #    selection_media:
  #     id: 1
-  #    smoothie: 0
+  #    octoprint_id: 0
 #      max_steps: 200
 
    #   motor_connections:
     #    valve_steps: -30
      #   valve: 'Z'
       #  plunger: 'E'
+
+# OctoPrint settings
+octoprint_instances:
+  octoprint_0:
+    octoprint_id: 0
+    serial_port: "/dev/ttyACM0" # serial port smoothieboard is connected to on evolver raspberry pi
+    serial_baudrate: 115200
+    gcode_folder: "/home/pi/gcode_files/octoprint_0"
+    port: 5000
 
 # xarm settings
 # 750
@@ -50,8 +63,8 @@ xarm_params:
   roll: 180
   pitch: 0
   yaw: 0
-  speed: 500
-  mvacc: 500
+  speed: 750
+  mvacc: 1000
 
 # octoprint settings
 octoprint_api_key: "B6EE0555EF414DA7B561496C10C4DE25"
