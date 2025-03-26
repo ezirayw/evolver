@@ -1,0 +1,8 @@
+1. (Python) server sends config byte array {address, type, length, config_data} to serial port and waits for prescribed time
+2. (Arduinos) all evolver_si objects on serial bus check if address matches
+3. (Arduions) evolver_si responds with
+3. (Python) after waiting, if server receives acknowledge byte, server sends data byte array
+
+
+packet structure
+address (1byte) - type(1byte) - length(1byte) - values(length*4)

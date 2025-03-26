@@ -1,16 +1,16 @@
 ---
 # network settings
-xarm_ip: '192.168.1.200'
-evolver_ip: '192.168.1.15'
+xarm_ip: "192.168.1.200"
+evolver_ip: "192.168.1.15"
 robotics_port: 8080 # port for fluidics server
 check_status_timout: 40 # timeout for check_status requests, needs to be larger than OctoPrint timeout
 
 # overflow/volume settings
 overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
 overflow_voltage_threshold: 0.33 # +/- value used in reference to overflow_voltage_step to account for noisy voltages
-overflow_trigger_map: 
+overflow_trigger_map:
   left: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3]
-  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4 ]
+  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4]
 
 # modes robotics can be in
 modes:
@@ -28,16 +28,16 @@ modes:
 
 # ipp settings
 ipp_mapping:
-  quad_0_efflux: 
+  quad_0_efflux:
     solenoid_numbers: [0, 1, 2]
     ipp_number: 1
-  quad_1_efflux: 
+  quad_1_efflux:
     solenoid_numbers: [3, 4, 5]
     ipp_number: 2
-  quad_2_efflux: 
+  quad_2_efflux:
     solenoid_numbers: [8, 9, 10]
     ipp_number: 3
-  quad_3_efflux: 
+  quad_3_efflux:
     solenoid_numbers: [11, 12, 13]
     ipp_number: 4
 
@@ -50,47 +50,43 @@ wash_settings:
   submersed_time: 10 # seconds
   dry_time: 10 # seconds
 
-# OctoPrint settings
-octoprint_instances:
+# pump configuration
+pump_config:
+  general: # # imported as a GeneralPumpConfig that all PumpConfig dataclasses have access to
+    priming_steps: 75
+    plunger_speed_in: 15000
+    plunger_speed_out: 10000
+    max_speed: 20000
+    pump_positions: 4
+  position_0: # imported as a PumpConfig dataclass
+    type: media
+    max_volume: 300 # steps
+    control_interface: octoprint_0 # or serial
+    address: 0
+    # 700 steps = 1.13mL
+    # 1mL = 619.47 steps
+
+# Serial or OctoPrint settings
+pump_control_interfaces:
   octoprint_0:
     gcode_dir: /home/pi/gcode_files/octoprint_0
     octoprint_dir: /home/pi/.octoprint_0
-    octoprint_id: 0
     post_gcode_timeout: 10 # timeout for post_gcode requests
     port: 5000
-    pumps: 
-      - base_media_0
-      - selection_media
+    pump_0:
+      valve_motor: X # connection stepper motor that controls valve is connected to (either X, Y, Z, E0, E1)
+      plunger_motor: Y # connection stepper motor that plunger is connected to (either X, Y, Z, E0, E1)
+      valve_steps: 28
 
-# Influx syringe pump settings
-pump_conf:
-  priming_steps: 75
-  plunger_speed_in: 15000
-  plunger_speed_out: 10000
-  safety_params:
-    max_speed: 20000
+#selection_media:
+#id: 1
+#octoprint_id: 0
+#max_steps: 200
 
-  pumps:
-    base_media_0:
-      position: 0 # either 0,1,2,3 depending on position in influx end effector
-      type: media
-      max_steps: 300
-      motor_connections:
-        valve_steps: 28
-        valve: X # connection stepper motor that controls valve is connected to (either X, Y, Z, E0, E1)
-        plunger: Y # connection stepper motor that plunger is connected to (either X, Y, Z, E0, E1)
-      # 700 steps = 1.13mL
-      # 1mL = 619.47 steps
-
-    #selection_media:
-      #id: 1
-      #octoprint_id: 0
-      #max_steps: 200
-
-      #motor_connections:
-        #valve_steps: -30
-        #valve: 'Z'
-        #plunger: 'E'
+#motor_connections:
+#valve_steps: -30
+#valve: 'Z'
+#plunger: 'E'
 
 # xarm settings
 # 750
@@ -144,7 +140,7 @@ homing_coordinates:
       x_in: 64.9
       y: -320.5
       z_out: 459
-      z_in: 427  
+      z_in: 427
     vial_17:
       x_out: 103.1
       x_in: 99.7
@@ -156,24 +152,24 @@ homing_coordinates:
       x_in: null
       y: null
       z_out: null
-      z_in: null 
+      z_in: null
     vial_17:
       x_out: null
       x_in: null
       y: null
       z_out: null
       z_in: null
-  
+
   quad_3:
     vial_0:
       x_out: null
       x_in: null
       y: null
       z_out: null
-      z_in: null 
+      z_in: null
     vial_17:
       x_out: null
       x_in: null
       y: null
       z_out: null
-      z_in: null 
+      z_in: null
