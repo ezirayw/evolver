@@ -21,7 +21,7 @@ class EvolverSerialError(Exception):
     pass
 
 
-class ConfigError(Exception):
+class APIError(Exception):
     pass
 
 
@@ -29,8 +29,7 @@ class SerialCommand(TypedDict):
     param: str
     address: int
     value: list[int]
-    immediate: bool
-    recurring: bool
+    request: bool
     acknowledge: bool
 
 
@@ -45,9 +44,7 @@ class BroadcastData(TypedDict, total=False):
 @dataclass
 class EvolverServer:
     evolver_ip: str
-    sio: socketio.AsyncServer = field(
-        default_factory=lambda: socketio.AsyncServer(always_connect=True)
-    )
+    sio: socketio.AsyncServer = field(default_factory=lambda: socketio.AsyncServer(always_connect=True))
     calibrations_filename: str = field(default="calibrations.json")
     evolver_conf: dict = field(default_factory=dict)
 
@@ -55,31 +52,24 @@ class EvolverServer:
     command_queue: list[SerialCommand] = field(default_factory=list)
     running_immediate: bool = field(default=False)
     running_broadcast: bool = field(default=False)
-    recurring_tag: int = field(default=0)
-    immediate_tag: int = field(default=1)
+    request_tag: int = field(default=0)
     acknowledge_tag: int = field(default=2)
     sensor_tag: int = field(default=3)
     echo_tag: int = field(default=4)
-    serial_delay: float = field(default=0.1)
 
     def __post_init__(self):
         """Initialize additional attributes after instance creation."""
         with open(
-            os.path.realpath(
-                os.path.join(
-                    os.getcwd(), os.path.dirname(__file__), EVOLVER_CONF_FILENAME
-                )
-            ),
+            os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), EVOLVER_CONF_FILENAME)),
             "r",
         ) as ymlfile:
             self.evolver_conf = yaml.safe_load(ymlfile)
 
-        self.serial_delay = self.evolver_conf["serial_delay"]
-        self.recurring_tag = self.evolver_conf["command_types"]["recurring"]
-        self.immediate_tag = self.evolver_conf["command_types"]["immediate"]
+        self.request_tag = self.evolver_conf["command_types"]["request"]
         self.acknowledge_tag = self.evolver_conf["command_types"]["acknowledge"]
         self.sensor_tag = self.evolver_conf["command_types"]["sensor"]
         self.echo_tag = self.evolver_conf["command_types"]["echo"]
+        self.config_tag = self.evolver_conf["command_types"]["config"]
         self.serial_connection = serial.Serial(
             port=self.evolver_conf["serial_port"],
             baudrate=self.evolver_conf["serial_baudrate"],
@@ -94,47 +84,55 @@ class EvolverServer:
 
     async def on_command(self, sid, data):
         logger.info("Received COMMAND")
-        phase = data.get("param", None)
         param = data.get("param", None)
         value = data.get("value", [])
         immediate = data.get("immediate", False)
         recurring = data.get("recurring", False)
 
-        # Update the configuration for the param
-        if self.evolver_conf["parameters"][phase][param]["value"] is not None:
-            self.evolver_conf["parameters"][phase][param]["value"] = value
+        # Check to see if received command matches a configured parameter, and if so, get the phase config
+        command_phase = ""
+        for phase in self.evolver_conf["parameters"]:
+            exit = False
+            for parameter in self.evolver_conf["parameters"][phase]:
+                if parameter == param:
+                    exit = True
+                    command_phase = phase
+                    break
+            if exit:
+                break
 
-        self.evolver_conf["experimental_params"][phase][param]["recurring"] = recurring
+        if command_phase == "":
+            raise APIError("Received COMMAND does not match valid parameter")
 
-        # Save to config the values sent in for the parameter
-        with open(
-            os.path.realpath(
-                os.path.join(os.getcwd(), os.path.dirname(__file__), "conf.yml")
-            ),
-            "w",
-        ) as ymlfile:
-            yaml.dump(self.evolver_conf, ymlfile)
-
+        # Initialize a new SerialCommand with the data received if its an immediate command
         if immediate:
-            # Initialize a new SerialCommand with the data received
             new_command: SerialCommand = {
                 "param": param,
-                "address": self.evolver_conf["parameters"][phase][param]["address"],
+                "address": self.evolver_conf["parameters"][command_phase][param]["address"],
                 "value": value,
-                "immediate": True,
-                "recurring": False,
+                "request": True,
                 "acknowledge": False,
             }
 
             self.command_queue.insert(0, new_command)
-            logger.info(
-                "adding the following immediate command to queue: %s", new_command
-            )
+            logger.info("adding the following immediate command to queue: %s", new_command)
+            # convert phase information to int
+            phase_num = int(command_phase.split("_")[1])
             if not self.running_broadcast:
                 logger.info("running the following immediate command: %s", new_command)
                 self.running_immediate = True
-                await self.run_commands(phase)
+                await self.run_commands(phase_num)
                 self.running_immediate = False
+
+        # Update the parameter information in active conf dictionary and conf file
+        self.evolver_conf["parameters"][command_phase][param]["recurring"] = recurring
+        if self.evolver_conf["parameters"][command_phase][param]["value"] is not None:
+            self.evolver_conf["parameters"][command_phase][param]["value"] = value
+        with open(
+            os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), "conf.yml")),
+            "w",
+        ) as ymlfile:
+            yaml.dump(self.evolver_conf, ymlfile)
 
     async def on_getlastcommands(self, sid, data):
         await self.sio.emit("config", self.evolver_conf, namespace="/default_evolver")
@@ -155,9 +153,7 @@ class EvolverServer:
         except FileNotFoundError:
             logging.warning("Error reading calibrations file.")
 
-        await self.sio.emit(
-            "calibrationnames", calibration_names, namespace="/default_evolver"
-        )
+        await self.sio.emit("calibrationnames", calibration_names, namespace="/default_evolver")
 
     async def on_getfitnames(self, sid, data):
         fit_names = []
@@ -184,9 +180,7 @@ class EvolverServer:
                 calibrations = json.load(f)
                 for calibration in calibrations:
                     if calibration["name"] == data["name"]:
-                        await self.sio.emit(
-                            "calibration", calibration, namespace="/default_evolver"
-                        )
+                        await self.sio.emit("calibration", calibration, namespace="/default_evolver")
                         break
         except FileNotFoundError:
             logging.warning("Error reading calibrations file.")
@@ -212,9 +206,7 @@ class EvolverServer:
                 calibrations.append(data)
             with open(os.path.join(LOCATION, self.calibrations_filename), "w") as f:
                 json.dump(calibrations, f)
-                await self.sio.emit(
-                    "calibrationrawcallback", "success", namespace="/default_evolver"
-                )
+                await self.sio.emit("calibrationrawcallback", "success", namespace="/default_evolver")
         except FileNotFoundError:
             logging.warning("Error reading calibrations file.")
 
@@ -282,9 +274,7 @@ class EvolverServer:
                         if fit["active"]:
                             active_calibrations.append(calibration)
                             break
-            await self.sio.emit(
-                "activecalibrations", active_calibrations, namespace="/default_evolver"
-            )
+            await self.sio.emit("activecalibrations", active_calibrations, namespace="/default_evolver")
         except FileNotFoundError:
             logging.warning("Error reading calibrations file.")
 
@@ -302,12 +292,12 @@ class EvolverServer:
             f.write(json.dumps(data))
         await self.sio.emit("broadcastname", data, namespace="/default_evolver")
 
-    async def run_commands(self, current_phase: str):
+    async def run_commands(self, phase: int):
         data: dict[str, list[int]] = {}
         while len(self.command_queue) > 0:
             command = self.command_queue.pop(0)
             try:
-                returned_data = self.serial_communication(command, current_phase)
+                returned_data = self.serial_communication(command, phase)
                 if returned_data is not None:
                     data[command["param"]] = returned_data
             except (
@@ -356,7 +346,7 @@ class EvolverServer:
 
         return result
 
-    def cobs_decode(self, data: bytearray) -> bytearray:
+    def cobs_decode(self, data: bytearray | bytes) -> bytearray:
         """
         Decode COBS-encoded data.
 
@@ -390,8 +380,7 @@ class EvolverServer:
         # Get address from command if it exists, otherwise fetch from config
         address = command["address"]
         value = command["value"]
-        immediate = command["immediate"]
-        recurring = command["recurring"]
+        request = command["request"]
         acknowledge = command["acknowledge"]
 
         # Add the address to the header of the packet
@@ -402,10 +391,8 @@ class EvolverServer:
 
         # Add the type to the packet
         # Check that parameters being sent to arduino match expected values
-        if recurring:
-            packet.extend(struct.pack("<1B", self.recurring_tag))
-        if immediate:
-            packet.extend(struct.pack("<1B", self.immediate_tag))
+        if request:
+            packet.extend(struct.pack("<1B", self.request_tag))
         if acknowledge:
             packet.extend(struct.pack("<1B", self.acknowledge_tag))
 
@@ -423,23 +410,17 @@ class EvolverServer:
         encoded_packet = self.cobs_encode(packet)
         return encoded_packet
 
-    def serial_communication(self, command: SerialCommand, current_phase: str):
+    def serial_communication(self, command: SerialCommand, phase: int):
         self.serial_connection.reset_input_buffer()
         self.serial_connection.reset_output_buffer()
         logger.debug(command)
         packet_send = self.build_packet(command)
         logger.debug("serial write MESSAGE to arduino: %s", packet_send.hex(" "))
         self.serial_connection.write(packet_send)
-        time.sleep(self.serial_delay)
 
         # Read until we get a zero byte (end of COBS packet)
-        response_bytes = bytearray()
-        while True:
-            byte = self.serial_connection.read(1)
-            if not byte or byte == b"\x00":
-                break
-            response_bytes.extend(byte)
-
+        response_bytes = self.serial_connection.read_until(expected=b"\x00")
+        logger.debug("serial encoded response from arduino: %s", response_bytes.hex(" "))
         if not response_bytes:
             raise EvolverSerialError("No response received from Arduino")
 
@@ -447,7 +428,8 @@ class EvolverServer:
         try:
             packed_decoded_response = self.cobs_decode(response_bytes)
             logger.debug(
-                "serial response from arduino: %s", packed_decoded_response.hex(" ")
+                "serial decoded response from arduino: %s",
+                packed_decoded_response.hex(" "),
             )
         except Exception as e:
             logger.error("Error decoding COBS response: %s", str(e))
@@ -460,9 +442,7 @@ class EvolverServer:
         # Verify the checksum
         calculated_checksum = sum(packed_decoded_response)
         while calculated_checksum > 0xFF:
-            calculated_checksum = (calculated_checksum & 0xFF) + (
-                calculated_checksum >> 8
-            )
+            calculated_checksum = (calculated_checksum & 0xFF) + (calculated_checksum >> 8)
 
         if calculated_checksum != 0xFF:
             logger.error(
@@ -473,16 +453,15 @@ class EvolverServer:
             raise EvolverSerialError("Checksum verification failed for response packet")
 
         # ACKNOWLEDGE - send acknowledgment to arduino
-        command["immediate"] = False
-        command["recurring"] = False
+        command["request"] = False
         command["acknowledge"] = True
         logger.debug(command)
         packet_ack = self.build_packet(command)
         logger.debug("serial write ACK to arduino: %s", packet_ack.hex(" "))
         self.serial_connection.write(packet_ack)
 
-        # This is necessary to allow the ack to be fully written out
-        time.sleep(self.serial_delay)
+        # wait for full packet transmission to arduino in a dynamic fashion since packet lengths will vary
+        self.serial_connection.flush()
 
         # Extract response packet header information
         packet_response_data_length = packed_decoded_response[1]
@@ -493,9 +472,9 @@ class EvolverServer:
             packet_response_data = []
             for i in range(packet_response_data_length):
                 if 3 + i * 4 + 3 <= len(packed_decoded_response):
-                    value = struct.unpack(
-                        "<I", packed_decoded_response[3 + i * 4 : 3 + i * 4 + 4]
-                    )[0]
+                    # unpack response data payload using little-endian
+                    # intrepret data integers as type int (NOT unsigned int)
+                    value = struct.unpack("<i", packed_decoded_response[3 + i * 4 : 3 + i * 4 + 4])[0]
                     packet_response_data.append(value)
             return packet_response_data
         else:
@@ -524,21 +503,20 @@ class EvolverServer:
         # run any IMMEDIATE commands in command_queue
         if len(self.command_queue) > 0:
             logger.info("Running IMMEIDATE commands in command queue")
-            await self.run_commands(phase_string)
+            await self.run_commands(phase)
 
         # send the broadcast phase state to arduinos using addresses 0x00 -> 0x03
-        for address in [1, 2, 3]:
-            param = f"arduino_{address}"
+        for arduino_address in [1, 2, 3]:
+            param = f"arduino_{arduino_address}"
             new_command: SerialCommand = {
                 "param": param,
-                "address": address,
+                "address": arduino_address,
                 "value": [phase],
-                "recurring": True,
-                "immediate": False,
+                "request": True,
                 "acknowledge": False,
             }
             self.command_queue.append(new_command)
-        await self.run_commands(phase_string)
+        await self.run_commands(phase)
 
         if not self.evolver_conf["parameters"][phase_string]:
             # phase has no direct parameters to regulate skip
@@ -551,18 +529,15 @@ class EvolverServer:
             if config["recurring"]:
                 new_command: SerialCommand = {
                     "param": param,
-                    "address": self.evolver_conf["parameters"][phase_string][param][
-                        "address"
-                    ],
+                    "address": self.evolver_conf["parameters"][phase_string][param]["address"],
                     "value": config["value"],
-                    "recurring": True,
-                    "immediate": False,
+                    "request": True,
                     "acknowledge": False,
                 }
                 self.command_queue.append(new_command)
         # run RECURRING commands that were just added
         broadcast_data["phase"] = phase
-        broadcast_data["data"] = await self.run_commands(phase_string)
+        broadcast_data["data"] = await self.run_commands(phase)
 
         # Build broadcast packet
         broadcast_data["config"] = self.evolver_conf["parameters"][phase_string]
@@ -577,33 +552,21 @@ class EvolverServer:
         self.sio.on("connect", self.on_connect, namespace="/default_evolver")
         self.sio.on("disconnect", self.on_disconnect, namespace="/default_evolver")
         self.sio.on("command", self.on_command, namespace="/default_evolver")
-        self.sio.on(
-            "getlastcommands", self.on_getlastcommands, namespace="/default_evolver"
-        )
+        self.sio.on("getlastcommands", self.on_getlastcommands, namespace="/default_evolver")
         self.sio.on(
             "getcalibrationnames",
             self.on_getcalibrationnames,
             namespace="default_evolver",
         )
         self.sio.on("getfitnames", self.on_getfitnames, namespace="/default_evolver")
-        self.sio.on(
-            "getcalibration", self.on_getcalibration, namespace="/default_evolver"
-        )
-        self.sio.on(
-            "setrawcalibration", self.on_setrawcalibration, namespace="/default_evolver"
-        )
+        self.sio.on("getcalibration", self.on_getcalibration, namespace="/default_evolver")
+        self.sio.on("setrawcalibration", self.on_setrawcalibration, namespace="/default_evolver")
         self.sio.on(
             "setfitcalibration",
             self.on_setfitcalibrations,
             namespace="/default_evolver",
         )
-        self.sio.on(
-            "setactivecal", self.on_setactiveodcal, namespace="/default_evolver"
-        )
+        self.sio.on("setactivecal", self.on_setactiveodcal, namespace="/default_evolver")
         self.sio.on("getactivecal", self.on_getactivecal, namespace="/default_evolver")
-        self.sio.on(
-            "getdevicename", self.on_getdevicename, namespace="/default_evolver"
-        )
-        self.sio.on(
-            "setdevicename", self.on_setdevicename, namespace="/default_evolver"
-        )
+        self.sio.on("getdevicename", self.on_getdevicename, namespace="/default_evolver")
+        self.sio.on("setdevicename", self.on_setdevicename, namespace="/default_evolver")

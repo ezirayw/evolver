@@ -30,16 +30,12 @@ robotics_conf = {}
 
 if __name__ == "__main__":
     with open(
-        os.path.realpath(
-            os.path.join(os.getcwd(), os.path.dirname(__file__), EVOLVER_CONF_FILENAME)
-        ),
+        os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), EVOLVER_CONF_FILENAME)),
         "r",
     ) as ymlfile:
         evolver_conf = yaml.safe_load(ymlfile)
     with open(
-        os.path.realpath(
-            os.path.join(os.getcwd(), os.path.dirname(__file__), ROBOTICS_CONF_FILENAME)
-        ),
+        os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), ROBOTICS_CONF_FILENAME)),
         "r",
     ) as ymlfile:
         robotics_conf = yaml.safe_load(ymlfile)
@@ -91,10 +87,7 @@ if __name__ == "__main__":
         evolver_status = evolver_server.get_evolver_status()
 
         if (
-            (
-                last_time is None
-                or current_time - last_time > evolver_conf["broadcast_timing"]
-            )
+            (last_time is None or current_time - last_time >= evolver_conf["broadcast_timing"])
             and not evolver_status["running_immediate"]
             and not evolver_status["running_broadcast"]
         ):
@@ -116,8 +109,4 @@ if __name__ == "__main__":
             elapsed_time = end_time - start_time
             logger.info("total broadcast processing time: %s" % elapsed_time)
 
-            if (
-                last_time is None
-                or current_time - last_time > evolver_conf["broadcast_timing"]
-            ):
-                last_time = time.time()
+            last_time = time.time()

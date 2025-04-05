@@ -23,12 +23,12 @@ parameters:
       recurring: true
       address: 4
       data_length: 8
-      value: [4095, 4095, 4095, 4095, 4095, 4095, 4095, 4095]
+      value: [0, 0, 0, 0, 0, 0, 0, 0]
     od_led_right:
       recurring: true
       address: 5
       data_length: 8
-      value: [4095, 4095, 4095, 4095, 4095, 4095, 4095, 4095]
+      value: [0, 0, 0, 0, 0, 0, 0, 0]
     od_90_left:
       recurring: true
       address: 6
@@ -147,14 +147,12 @@ serial_end_outgoing: "_!"
 serial_end_incoming: end
 serial_port: "/dev/ttyAMA0"
 serial_baudrate: 9600
-serial_timeout: 1
-serial_delay: .2
+serial_timeout: 2
 command_types:
   # server to arduinos
-  recurring: 0
-  immediate: 1
-  acknowledge: 2
+  request: 0
+  acknowledge: 1
   # arduinos to server
-  sensor: 3
-  echo: 4
-  config: 5
+  sensor: 2
+  echo: 3
+  config: 4
