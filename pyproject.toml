@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "htevolver"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Ezira Yimer Wolle", email = "ezirayw@bu.edu" }]
+maintainers = [{ name = "Ezira Yimer Wolle", email = "ezirayw@bu.edu" }]
+keywords = ["evolver", "htevolver"]
+classifiers = [
+    'Development Status :: 1 - Beta',
+    'Environment :: Console',
+    'Intended Audience :: Science/Research',
+    'Programming Language :: Python :: 3.11',
+    'Topic :: Scientific/Engineering',
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/ezirayw/evolver"
+
+[project.optional-dependencies]
+dev = []
+
+[tool.pyright]
+venvPath = "/Users/ezirayimerwolle/.pyenv/versions"
+venv = "evolver"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -1,15 +1,16 @@
-import os
-import numpy as np
-import yaml
-import aiohttp
-import requests
-import socketio
 import asyncio
-import shutil
 import logging
+import os
+import shutil
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
+
+import aiohttp
+import numpy as np
+import requests
 import skimage as ski
+import socketio
+import yaml
 from xarm.wrapper import XArmAPI
 
 logger = logging.getLogger(__name__)
@@ -105,9 +106,7 @@ class OctoPrintInterface:
         self.post_gcode_timeout = self.octoprint_conf["post_gcode_timeout"]
         self.gcode_dir = self.octoprint_conf["gcode_dir"]
         self.instance_dir = self.octoprint_conf["octoprint_dir"]
-        self.base_url = (
-            "http://" + self.evolver_ip + ":" + str(self.octoprint_conf["port"])
-        )
+        self.base_url = "http://" + self.evolver_ip + ":" + str(self.octoprint_conf["port"])
         self.id = self.octoprint_conf["octoprint_id"]
 
         # load in user.yaml file to get api_key
@@ -132,9 +131,7 @@ class OctoPrintInterface:
             if response.status_code == 400:
                 logger.warning("cannot connect to pumps on %s" % self.name)
         except Exception as e:
-            raise OctoPrintError(
-                "could not connect to pumps on %s due to error: %s" % (self.name, e)
-            )
+            raise OctoPrintError("could not connect to pumps on %s due to error: %s" % (self.name, e))
 
     def disconnect(self):
         """Disconnect OctoPrint instance from pumps on smoothieboard using OctoPrint API."""
@@ -152,9 +149,7 @@ class OctoPrintInterface:
             if response.status_code == 400:
                 logger.warning("cannot disconnect from pumps on %s" % self.name)
         except Exception as e:
-            raise OctoPrintError(
-                "could not disconnect to pumps on %s due to error: %s" % (self.name, e)
-            )
+            raise OctoPrintError("could not disconnect to pumps on %s due to error: %s" % (self.name, e))
 
     def cancel(self):
         """Cancel any current pump jobs on smoothieboard using OctoPrint API.
@@ -163,10 +158,7 @@ class OctoPrintInterface:
         """
 
         if self.connected == False:
-            raise OctoPrintError(
-                "cannot cancel current job on %s, not connected to syringe pump"
-                % self.name
-            )
+            raise OctoPrintError("cannot cancel current job on %s, not connected to syringe pump" % self.name)
 
         # send POST request to OctoPrint server
         payload = {"command": "cancel"}
@@ -176,15 +168,11 @@ class OctoPrintInterface:
         try:
             response = requests.post(temp_url, headers=header, json=payload)
             if response.status_code == 204:
-                logger.debug(
-                    "cancellation of active pump jobs on %s successful" % self.name
-                )
+                logger.debug("cancellation of active pump jobs on %s successful" % self.name)
             if response.status_code == 409:
                 logger.warning("no active pump jobs found to cancel on %s" % self.name)
         except Exception as e:
-            raise OctoPrintError(
-                "could not cancel active jobs on %s due to error: %s" % (self.name, e)
-            )
+            raise OctoPrintError("could not cancel active jobs on %s due to error: %s" % (self.name, e))
 
     async def get_status(self, session):
         """Check status of OctoPrint instance, including any active jobs, using the OctoPrint API.
@@ -202,13 +190,9 @@ class OctoPrintInterface:
             async with session.get(url, headers=header) as response:
                 return await response.json()
         except Exception as e:
-            raise OctoPrintError(
-                "could not check job successfully for %s: %s" % (self.name, e)
-            )
+            raise OctoPrintError("could not check job successfully for %s: %s" % (self.name, e))
 
-    def write_gcode(
-        self, mode: str, pump_instructions: dict, pump_conf: dict, primed_status: bool
-    ):
+    def write_gcode(self, mode: str, pump_instructions: dict, pump_conf: dict, primed_status: bool):
         """Writes G-code instructions to local file based on the given mode and pump steps.
 
         Args:
@@ -227,27 +211,19 @@ class OctoPrintInterface:
             for pump in pump_instructions:
                 # get pump port settings
                 plunger_motor = pump_conf["pumps"][pump]["motor_connections"]["plunger"]
-                plunger_commands.append(
-                    "{0}-{1}".format(plunger_motor, pump_instructions[pump])
-                )
+                plunger_commands.append("{0}-{1}".format(plunger_motor, pump_instructions[pump]))
 
             # combine gcode commands
             # command = plunger_commands[0] + ' ' + plunger_commands[1]
             combined_plunger_commands = " ".join(plunger_commands)
-            gcode = "G91\nG1 {0} F{1}\nM18".format(
-                combined_plunger_commands, pump_conf["plunger_speed_in"]
-            )
+            gcode = "G91\nG1 {0} F{1}\nM18".format(combined_plunger_commands, pump_conf["plunger_speed_in"])
 
         elif mode == "dispense":
             for pump in pump_instructions:
                 plunger_motor = pump_conf["pumps"][pump]["motor_connections"]["plunger"]
                 valve_motor = pump_conf["pumps"][pump]["motor_connections"]["valve"]
-                valve_steps_on = pump_conf["pumps"][pump]["motor_connections"][
-                    "valve_steps"
-                ]
-                valve_steps_off = (
-                    pump_conf["pumps"][pump]["motor_connections"]["valve_steps"] * -1
-                )
+                valve_steps_on = pump_conf["pumps"][pump]["motor_connections"]["valve_steps"]
+                valve_steps_off = pump_conf["pumps"][pump]["motor_connections"]["valve_steps"] * -1
 
                 if primed_status and pump_instructions[pump] != 0:
                     plunger_commands.append(
@@ -256,25 +232,17 @@ class OctoPrintInterface:
                             pump_instructions[pump] + pump_conf["priming_steps"],
                         )
                     )
-                    prime_commands.append(
-                        "{0}-{1}".format(plunger_motor, pump_conf["priming_steps"])
-                    )
+                    prime_commands.append("{0}-{1}".format(plunger_motor, pump_conf["priming_steps"]))
                 else:
-                    plunger_commands.append(
-                        "{0}{1}".format(plunger, pump_instructions[pump])
-                    )
+                    plunger_commands.append("{0}{1}".format(plunger, pump_instructions[pump]))
                     prime_commands.append("")
 
                 if pump_instructions[pump] == 0:
                     valve_commands["on"].append("{0}{1}".format(valve_motor, 0))
                     valve_commands["off"].append("{0}{1}".format(valve_motor, 0))
                 else:
-                    valve_commands["on"].append(
-                        "{0}{1}".format(valve_motor, valve_steps_on)
-                    )
-                    valve_commands["off"].append(
-                        "{0}{1}".format(valve_motor, valve_steps_off)
-                    )
+                    valve_commands["on"].append("{0}{1}".format(valve_motor, valve_steps_on))
+                    valve_commands["off"].append("{0}{1}".format(valve_motor, valve_steps_off))
 
             # combine gcode commands
             # valve_on = valve_commands['on'][0] + ' ' + valve_commands['on'][1]
@@ -303,22 +271,12 @@ class OctoPrintInterface:
             for pump in pump_instructions:
                 plunger_motor = pump_conf["pumps"][pump]["motor_connections"]["plunger"]
                 valve_motor = pump_conf["pumps"][pump]["motor_connections"]["valve"]
-                valve_steps_on = pump_conf["pumps"][pump]["motor_connections"][
-                    "valve_steps"
-                ]
-                valve_steps_off = (
-                    pump_conf["pumps"][pump]["motor_connections"]["valve_steps"] * -1
-                )
+                valve_steps_on = pump_conf["pumps"][pump]["motor_connections"]["valve_steps"]
+                valve_steps_off = pump_conf["pumps"][pump]["motor_connections"]["valve_steps"] * -1
 
-                plunger_commands.append(
-                    "{0}{1}".format(plunger_motor, pump_instructions[pump])
-                )
-                valve_commands["on"].append(
-                    "{0}{1}".format(valve_motor, valve_steps_on)
-                )
-                valve_commands["off"].append(
-                    "{0}{1}".format(valve_motor, valve_steps_off)
-                )
+                plunger_commands.append("{0}{1}".format(plunger_motor, pump_instructions[pump]))
+                valve_commands["on"].append("{0}{1}".format(valve_motor, valve_steps_on))
+                valve_commands["off"].append("{0}{1}".format(valve_motor, valve_steps_off))
 
             # combine gcode commands
             combined_valve_on_commands = " ".join(valve_commands["on"])
@@ -352,9 +310,7 @@ class OctoPrintInterface:
             OctoPrintError: If there is an error while sending the G-code file."""
 
         if self.connected == False:
-            raise OctoPrintError(
-                "cannot post gcode to %s, not connected to pumps" % self.name
-            )
+            raise OctoPrintError("cannot post gcode to %s, not connected to pumps" % self.name)
 
         url = self.base_url + "/api/files/local"
         header = {"X-Api-Key": self.api_key}
@@ -365,24 +321,18 @@ class OctoPrintInterface:
                 with open(gcode_path, "rb") as f:
                     # send POST request to OctoPrint server
                     payload = {"file": f, "print": "true"}
-                    async with session.post(
-                        url, headers=header, data=payload
-                    ) as response:
+                    async with session.post(url, headers=header, data=payload) as response:
                         result = await response.json()
                         logger.debug(result)
                         if result["done"]:
                             break
 
             except KeyError as e:
-                logger.debug(
-                    "could not recognize successful gcode POST event to %s, trying again: %s"
-                    % (self.name, e)
-                )
+                logger.debug("could not recognize successful gcode POST event to %s, trying again: %s" % (self.name, e))
                 request_attempts = request_attempts + 1
                 if request_attempts > self.post_gcode_timeout:
                     raise OctoPrintError(
-                        "could not post gcode to %s after %s attempts"
-                        % (self.name, self.robotics_conf["post_request_timeout"])
+                        "could not post gcode to %s after %s attempts" % (self.name, self.robotics_conf["post_request_timeout"])
                     )
                 await asyncio.sleep(0.25)  # wait 0.25 second before trying again
 
@@ -396,9 +346,7 @@ class RoboticsStatus:
     active_quad: str = None
     active_pumps: list = field(default_factory=list)
     vial_window: list = field(default_factory=list)
-    overflow_status: dict = field(
-        default_factory=lambda: {"quads": [False, False, False, False], "vial": None}
-    )
+    overflow_status: dict = field(default_factory=lambda: {"quads": [False, False, False, False], "vial": None})
     xArm: dict = field(
         default_factory=lambda: {
             "warning_code": 0,
@@ -408,16 +356,12 @@ class RoboticsStatus:
         }
     )
     OctoPrint: dict = field(default_factory=dict)
-    prime_status: dict = field(
-        default_factory=lambda: {"influx": False, "efflux": False}
-    )
+    prime_status: dict = field(default_factory=lambda: {"influx": False, "efflux": False})
 
 
 @dataclass
 class RoboticsServer(EvolverNamespace):
-    sio: socketio.AsyncServer = field(
-        default_factory=lambda: socketio.AsyncServer(always_connect=True)
-    )
+    sio: socketio.AsyncServer = field(default_factory=lambda: socketio.AsyncServer(always_connect=True))
     evolver_ns: EvolverNamespace = None
     robotics_status: RoboticsStatus = field(default_factory=RoboticsStatus)
     server_path: str = field(init=False)
@@ -431,9 +375,7 @@ class RoboticsServer(EvolverNamespace):
 
     def __post_init__(self):
         self.server_path = os.path.dirname(os.path.abspath(__file__))
-        self.robotics_conf_path = os.path.join(
-            self.server_path, "robotics_server_conf.yml"
-        )
+        self.robotics_conf_path = os.path.join(self.server_path, "robotics_server_conf.yml")
         with open(self.robotics_conf_path, "r") as conf:
             self.robotics_conf = yaml.safe_load(conf)
         self.pump_conf = self.robotics_conf["pump_conf"]
@@ -445,21 +387,11 @@ class RoboticsServer(EvolverNamespace):
                 self.robotics_conf["evolver_ip"],
                 self.robotics_conf["octoprint_instances"][octoprint_name],
             )
-            self.robotics_status.OctoPrint[octoprint_name] = {
-                "connection_status": self.octoprint_instances[octoprint_name].connected
-            }
-            gcode_dir_exist = os.path.exists(
-                self.robotics_conf["octoprint_instances"][octoprint_name]["gcode_dir"]
-            )
+            self.robotics_status.OctoPrint[octoprint_name] = {"connection_status": self.octoprint_instances[octoprint_name].connected}
+            gcode_dir_exist = os.path.exists(self.robotics_conf["octoprint_instances"][octoprint_name]["gcode_dir"])
             if gcode_dir_exist:
-                shutil.rmtree(
-                    self.robotics_conf["octoprint_instances"][octoprint_name][
-                        "gcode_dir"
-                    ]
-                )
-            os.makedirs(
-                self.robotics_conf["octoprint_instances"][octoprint_name]["gcode_dir"]
-            )
+                shutil.rmtree(self.robotics_conf["octoprint_instances"][octoprint_name]["gcode_dir"])
+            os.makedirs(self.robotics_conf["octoprint_instances"][octoprint_name]["gcode_dir"])
 
         self.arm = XArmAPI(self.xarm_ip, enable_report=True)
         self.arm.clean_warn()
@@ -487,13 +419,9 @@ class RoboticsServer(EvolverNamespace):
     def register_callback(self):
         """Register the error_warn_changed_callback and state_changed_callback for the xArm 5."""
 
-        self.arm.register_error_warn_changed_callback(
-            callback=self.error_warn_change_callback
-        )
+        self.arm.register_error_warn_changed_callback(callback=self.error_warn_change_callback)
         self.arm.register_state_changed_callback(callback=self.state_changed_callback)
-        self.arm.register_connect_changed_callback(
-            callback=self.connect_changed_callback
-        )
+        self.arm.register_connect_changed_callback(callback=self.connect_changed_callback)
 
     def error_warn_change_callback(self, data: dict):
         """Update the error and warning codes in the robotics_status class attribute.
@@ -590,18 +518,13 @@ class RoboticsServer(EvolverNamespace):
         for octoprint_name in self.octoprint_instances:
             octoprint_instructions = {}
             for pump_target in instructions:
-                if (
-                    pump_target in self.pump_conf["pumps"]
-                    and pump_target in self.octoprint_instances[octoprint_name]["pumps"]
-                ):
+                if pump_target in self.pump_conf["pumps"] and pump_target in self.octoprint_instances[octoprint_name]["pumps"]:
                     octoprint_instructions[pump_target] = instructions[pump_target]
             octoprint_instructions_map[octoprint_name] = octoprint_instructions
 
         return octoprint_instructions_map
 
-    def make_ipp_command(
-        self, duration: int, frequency: int, ipp_address_key: str, polarity: int
-    ):
+    def make_ipp_command(self, duration: int, frequency: int, ipp_address_key: str, polarity: int):
         """Create a custom, eVOLVER-formatted ipp command.
 
         Args:
@@ -620,9 +543,7 @@ class RoboticsServer(EvolverNamespace):
         ipp_command = ["--"] * 48  # empty command
         ipp_index = 1
 
-        for ipp_address in self.robotics_conf["ipp_mapping"][ipp_address_key][
-            "solenoid_numbers"
-        ]:
+        for ipp_address in self.robotics_conf["ipp_mapping"][ipp_address_key]["solenoid_numbers"]:
             ipp_command[ipp_address] = "{0}|{1}|{2}|{3}".format(
                 frequency,
                 self.robotics_conf["ipp_mapping"][ipp_address_key]["ipp_number"],
@@ -651,9 +572,7 @@ class RoboticsServer(EvolverNamespace):
 
         # create get_status() tasks for each OctoPrint instance
         for octoprint_name in self.octoprint_instances:
-            status_tasks.append(
-                self.octoprint_instances[octoprint_name].get_status(session)
-            )
+            status_tasks.append(self.octoprint_instances[octoprint_name].get_status(session))
             result["octoprint_statuses"][octoprint_name] = {}
 
         try:
@@ -707,9 +626,7 @@ class RoboticsServer(EvolverNamespace):
         - FluidicEventError: If there is an error running the fluidic event."""
 
         try:
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
         except ExitRobotics:
             raise
         self.robotics_status.mode = mode
@@ -725,11 +642,7 @@ class RoboticsServer(EvolverNamespace):
                         gcode_files[0],
                     )
                     check_files.append(gcode_path)
-                    aspiration_tasks.create_task(
-                        self.octoprint_instances[octoprint_name].post_gcode_async(
-                            session, gcode_path
-                        )
-                    )
+                    aspiration_tasks.create_task(self.octoprint_instances[octoprint_name].post_gcode_async(session, gcode_path))
 
                 if arm_settings:
                     aspiration_tasks.create_task(self.arm_path(arm_settings))
@@ -739,25 +652,17 @@ class RoboticsServer(EvolverNamespace):
             try:
                 self.arm_path(arm_settings)
             except* RoboticsError:
-                raise FluidicEventError(
-                    "Successive xArm errors detected after retyring post-reset during aspiration tasks"
-                )
+                raise FluidicEventError("Successive xArm errors detected after retyring post-reset during aspiration tasks")
         except* OctoPrintError:
             # try to reset OctoPrint and try again
-            raise FluidicEventError(
-                "OctoPrint error detected when trying to execute aspiration tasks"
-            )
+            raise FluidicEventError("OctoPrint error detected when trying to execute aspiration tasks")
         except* ExitRobotics:
             raise
         except* Exception:
-            raise FluidicEventError(
-                "Unforseen error encountered when trying to execute aspiration tasks, check logs for traceback"
-            )
+            raise FluidicEventError("Unforseen error encountered when trying to execute aspiration tasks, check logs for traceback")
 
         try:
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
         except ExitRobotics:
             raise
         self.robotics_status.mode = mode
@@ -779,9 +684,7 @@ class RoboticsServer(EvolverNamespace):
                 await asyncio.sleep(0.25)
 
         try:
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
         except ExitRobotics:
             raise
         self.robotics_status.mode = mode
@@ -796,26 +699,16 @@ class RoboticsServer(EvolverNamespace):
                         self.octoprint_instances[octoprint_name].gcode_dir,
                         gcode_files[1],
                     )
-                    dispense_tasks.create_task(
-                        self.octoprint_instances[octoprint_name].post_gcode_async(
-                            session, gcode_path
-                        )
-                    )
+                    dispense_tasks.create_task(self.octoprint_instances[octoprint_name].post_gcode_async(session, gcode_path))
                     check_files.append(gcode_path)
         except* OctoPrintError:
             # try to reset OctoPrint and try again
-            raise FluidicEventError(
-                "OctoPrint error detected when trying to execute dispense tasks"
-            )
+            raise FluidicEventError("OctoPrint error detected when trying to execute dispense tasks")
         except* Exception:
-            raise FluidicEventError(
-                "Unforseen error encountered when trying to execute dispense tasks, check logs for traceback"
-            )
+            raise FluidicEventError("Unforseen error encountered when trying to execute dispense tasks, check logs for traceback")
 
         try:
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
         except ExitRobotics:
             raise
         self.robotics_status.mode = mode
@@ -830,9 +723,7 @@ class RoboticsServer(EvolverNamespace):
                 break
             else:
                 if check_attempts > self.robotics_conf["check_status_timout"]:
-                    raise FluidicEventError(
-                        "check attempts for dispense fluidic event exceeded max attempts, check OctoPrint server logs"
-                    )
+                    raise FluidicEventError("check attempts for dispense fluidic event exceeded max attempts, check OctoPrint server logs")
                 check_attempts = check_attempts + 1
                 await asyncio.sleep(0.25)
 
@@ -881,20 +772,14 @@ class RoboticsServer(EvolverNamespace):
                         self.octoprint_instances[octoprint_name].gcode_dir,
                         "prime_pumps.gcode",
                     )
-                    prime_pumps_tasks.create_task(
-                        self.octoprint_instances[octoprint_name].post_gcode_async(
-                            session, gcode_path
-                        )
-                    )
+                    prime_pumps_tasks.create_task(self.octoprint_instances[octoprint_name].post_gcode_async(session, gcode_path))
                     check_files.append(gcode_path)
 
             # verify that syringe pumps are ready to receive future commands
             check_attempts = 0
             while True:
                 check = await self.check_status(session, check_files)
-                logger.debug(
-                    "checking status of OctoPrint commands for prime_influx_helper"
-                )
+                logger.debug("checking status of OctoPrint commands for prime_influx_helper")
                 logger.debug(check)
                 if check["accept_new_jobs"]:
                     break
@@ -911,9 +796,7 @@ class RoboticsServer(EvolverNamespace):
             await session.close()
         except Exception:
             await session.close()
-            raise HelperEventError(
-                "error running prime_influx_helper, check logs for traceback"
-            )
+            raise HelperEventError("error running prime_influx_helper, check logs for traceback")
 
     async def efflux_ipp_helper(self, data: dict):
         """Helper method to use efflux IPPs in polarity for efflux during influx routines or to add media/fluids into vials.
@@ -947,9 +830,7 @@ class RoboticsServer(EvolverNamespace):
                 polarity = data[quad]["polarity"]
             else:
                 polarity = self.robotics_conf["ipp_efflux_settings"]["polarity"]
-            efflux_commands.append(
-                self.make_ipp_command(duration, frequency, ipp_address_key, polarity)
-            )
+            efflux_commands.append(self.make_ipp_command(duration, frequency, ipp_address_key, polarity))
 
         ipp_efflux_command = ["--"] * 48  # empty command
         # collapse generated commands to a single command
@@ -982,9 +863,7 @@ class RoboticsServer(EvolverNamespace):
                 print_string = print_string + " {0} pump ".format(pump)
                 pipette_instructions[pump] = data[pump]
             else:
-                raise HelperEventError(
-                    "pump {0} not found in pump configuration".format(pump)
-                )
+                raise HelperEventError("pump {0} not found in pump configuration".format(pump))
         mapped_pipette_instructions = self.map_gcode_commands(pipette_instructions)
 
         for octoprint_name in mapped_pipette_instructions:
@@ -1003,18 +882,14 @@ class RoboticsServer(EvolverNamespace):
         gcode_files = ["aspirate.gcode", "dispense.gcode"]
 
         try:
-            await self.fluidic_event(
-                session, gcode_files, "pipette", print_string=print_string
-            )
+            await self.fluidic_event(session, gcode_files, "pipette", print_string=print_string)
             await session.close()
         except ExitRobotics:
             await session.close()
             raise
         except Exception:
             await session.close()
-            raise HelperEventError(
-                "Error running pipette_helper - stopping robotics. Check logs for traceback"
-            )
+            raise HelperEventError("Error running pipette_helper - stopping robotics. Check logs for traceback")
 
     async def influx_snake_helper(self, data: dict):
         """Helper function for executing sequential fluidic_event(s) in a snake-like pattern across Smart Quads. Use for dilution and fill_vial routines events if xArm is desired.
@@ -1047,56 +922,40 @@ class RoboticsServer(EvolverNamespace):
             # home based on vial_0 and vial_17 for each smart quad
             vial_0_out = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"][
-                        "x_out"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["x_out"],
                     self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["y"],
                 ]
             )
             vial_0_in = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"][
-                        "x_in"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["x_in"],
                     self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["y"],
                 ]
             )
 
             vial_17_out = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_17"][
-                        "x_out"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_17"]["x_out"],
                     self.robotics_conf["homing_coordinates"][quad_name]["vial_17"]["y"],
                 ]
             )
             vial_17_in = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_17"][
-                        "x_in"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_17"]["x_in"],
                     self.robotics_conf["homing_coordinates"][quad_name]["vial_17"]["y"],
                 ]
             )
 
             z_vial_dilution = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"][
-                        "z_out"
-                    ],
-                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"][
-                        "z_in"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["z_out"],
+                    self.robotics_conf["homing_coordinates"][quad_name]["vial_0"]["z_in"],
                 ]
             )
             z_wash_station = np.array(
                 [
-                    self.robotics_conf["homing_coordinates"][quad_name]["wash_station"][
-                        "z_out"
-                    ],
-                    self.robotics_conf["homing_coordinates"][quad_name]["wash_station"][
-                        "z_in"
-                    ],
+                    self.robotics_conf["homing_coordinates"][quad_name]["wash_station"]["z_out"],
+                    self.robotics_conf["homing_coordinates"][quad_name]["wash_station"]["z_in"],
                 ]
             )
 
@@ -1104,12 +963,8 @@ class RoboticsServer(EvolverNamespace):
             calibrated_coordinates_out = np.array([vial_0_out, vial_17_out])
             calibrated_coordinates_in = np.array([vial_0_in, vial_17_in])
 
-            transform_matrix_out = self.rigid_transform(
-                vial_coordinates, calibrated_coordinates_out
-            )
-            transform_matrix_in = self.rigid_transform(
-                vial_coordinates, calibrated_coordinates_in
-            )
+            transform_matrix_out = self.rigid_transform(vial_coordinates, calibrated_coordinates_out)
+            transform_matrix_in = self.rigid_transform(vial_coordinates, calibrated_coordinates_in)
             transform_matrices = np.stack((transform_matrix_out, transform_matrix_in))
 
             for row_num in range(np.size(vial_map, 0)):
@@ -1134,14 +989,10 @@ class RoboticsServer(EvolverNamespace):
                 num_vial_windows = None
                 uniform_pump_types = None
                 if len(set(pump_types)) > 1:
-                    num_vial_windows = 6 + (
-                        pump_num - 1
-                    )  # overhang vial window for pumps with different fluid types
+                    num_vial_windows = 6 + (pump_num - 1)  # overhang vial window for pumps with different fluid types
                     uniform_pump_types = False
                 if len(set(pump_types)) == 1:
-                    num_vial_windows = int(
-                        6 / len(pump_map)
-                    )  # no overhang vial window for pumps with same fluid types
+                    num_vial_windows = int(6 / len(pump_map))  # no overhang vial window for pumps with same fluid types
                     uniform_pump_types = True
 
                 # calculate number of active vial sets
@@ -1152,9 +1003,7 @@ class RoboticsServer(EvolverNamespace):
                 # Vial window essentially behaves like a queue data structure, where vials are first in, first out as arm moves along snake dilution path
                 for x in range(num_vial_windows):
                     if uniform_pump_types:
-                        vial_window = current_vial_row[
-                            x * len(pump_map) : x * len(pump_map) + len(pump_map)
-                        ]
+                        vial_window = current_vial_row[x * len(pump_map) : x * len(pump_map) + len(pump_map)]
                         active_pumps = pump_map
 
                     if not uniform_pump_types:
@@ -1179,9 +1028,7 @@ class RoboticsServer(EvolverNamespace):
                     print_string = print_string + "in {0}".format(quad_name)
 
                     logger.info("current vial window is: %s" % vial_window)
-                    logger.info(
-                        "active pumps for current vial window is: %s" % active_pumps
-                    )
+                    logger.info("active pumps for current vial window is: %s" % active_pumps)
 
                     # execute wash step for current vial_window
                     z = {"current": z_vial_dilution, "target": z_wash_station}
@@ -1197,9 +1044,7 @@ class RoboticsServer(EvolverNamespace):
                     for pump in active_pumps:
                         wash_pump_instructions[pump] = 0
 
-                    mapped_wash_pump_instructions = self.map_gcode_commands(
-                        wash_pump_instructions
-                    )
+                    mapped_wash_pump_instructions = self.map_gcode_commands(wash_pump_instructions)
                     for octoprint_name in mapped_wash_pump_instructions:
                         self.octoprint_instances[octoprint_name].write_gcode(
                             "aspirate",
@@ -1253,15 +1098,12 @@ class RoboticsServer(EvolverNamespace):
                         active_vial_name = "vial_{0}".format(vial_window[i])
                         active_pump = active_pumps[i]
                         pump_step_fraction = (
-                            syringe_pump_commands[active_pump][quad_name][
-                                active_vial_name
-                            ]
+                            syringe_pump_commands[active_pump][quad_name][active_vial_name]
                             / self.pump_conf["pumps"][active_pump]["max_steps"]
                         )
                         max = int(pump_step_fraction)
                         fractional_pump_instructions[active_pump] = int(
-                            (pump_step_fraction - max)
-                            * self.pump_conf["pumps"][active_pump]["max_steps"]
+                            (pump_step_fraction - max) * self.pump_conf["pumps"][active_pump]["max_steps"]
                         )
                         max_pump_counter[active_pump] = max
 
@@ -1271,20 +1113,14 @@ class RoboticsServer(EvolverNamespace):
                         # if desired volume is above maximum syringe volume, continously pump maximum syringe volumes, otherwise pump fractional syringe volume
                         for pump in active_pumps:
                             if max_pump_counter[pump] > 0:
-                                pump_instructions[pump] = self.pump_conf["pumps"][pump][
-                                    "max_steps"
-                                ]
+                                pump_instructions[pump] = self.pump_conf["pumps"][pump]["max_steps"]
                                 max_pump_counter[pump] = max_pump_counter[pump] - 1
 
                             if max_pump_counter[pump] == 0:
-                                pump_instructions[pump] = fractional_pump_instructions[
-                                    pump
-                                ]
+                                pump_instructions[pump] = fractional_pump_instructions[pump]
                                 fractional_pump_instructions[pump] = "done"
 
-                        mapped_pump_instructions = self.map_gcode_commands(
-                            pump_instructions
-                        )
+                        mapped_pump_instructions = self.map_gcode_commands(pump_instructions)
                         for octoprint_name in mapped_wash_pump_instructions:
                             self.octoprint_instances[octoprint_name].write_gcode(
                                 "aspirate",
@@ -1305,18 +1141,14 @@ class RoboticsServer(EvolverNamespace):
                         # if at end of row, next vial_window will be the next row
                         if not arm_moved:
                             if change_row:
-                                vial_dilution_coordinates[1] = (
-                                    vial_dilution_coordinates[1] - 18
-                                )
+                                vial_dilution_coordinates[1] = vial_dilution_coordinates[1] - 18
 
                             # subtract if in middle row to move left, add if in first or third
                             else:
                                 row_logic = 1
                                 if vial_dilution_coordinates[1] == 18:
                                     row_logic = -1
-                                vial_dilution_coordinates[0] = (
-                                    vial_dilution_coordinates[0] + row_logic * 18
-                                )
+                                vial_dilution_coordinates[0] = vial_dilution_coordinates[0] + row_logic * 18
 
                             z = {"current": z_wash_station, "target": z_vial_dilution}
                             arm_settings = {
@@ -1357,9 +1189,7 @@ class RoboticsServer(EvolverNamespace):
 
                         # check if volume for all vials in current vial window has been dispensed
                         # break loop if complete, otherwise continue pumping
-                        if list(fractional_pump_instructions.values()).count(
-                            "done"
-                        ) >= len(list(fractional_pump_instructions.values())):
+                        if list(fractional_pump_instructions.values()).count("done") >= len(list(fractional_pump_instructions.values())):
                             break
 
                     # finished dilutions for current vial_window, moving to next set of vials
@@ -1387,9 +1217,7 @@ class RoboticsServer(EvolverNamespace):
                 raise
 
             try:
-                self.robotics_status.mode = data[
-                    "mode"
-                ]  # influx_routine resumed, change robotics_status mode
+                self.robotics_status.mode = data["mode"]  # influx_routine resumed, change robotics_status mode
                 await self.move_arm(
                     {
                         "x": arm_coordinates_out[0][0],
@@ -1400,8 +1228,7 @@ class RoboticsServer(EvolverNamespace):
             except Exception:
                 await session.close()
                 raise HelperEventError(
-                    "Error moving arm up after finishing snake influx path for %s - stopping robotics. Check logs for traceback"
-                    % quad_name
+                    "Error moving arm up after finishing snake influx path for %s - stopping robotics. Check logs for traceback" % quad_name
                 )
 
         self.robotics_status.vial_window = None
@@ -1441,9 +1268,7 @@ class RoboticsServer(EvolverNamespace):
             )
             if result < 0:
                 raise RoboticsError(
-                    "Unforseen failure detected when trying to move xARM during move_arm(), error code {0} given".format(
-                        result
-                    )
+                    "Unforseen failure detected when trying to move xARM during move_arm(), error code {0} given".format(result)
                 )
 
     async def arm_path(self, arm_settings: dict):
@@ -1493,19 +1318,13 @@ class RoboticsServer(EvolverNamespace):
         next_coordinates_in = np.array([[x3], [y3], [1]])
 
         # transform vial coordinates into arm coordinates for each phase
-        arm_coordinates_out = np.dot(
-            arm_settings["transform_matrices"][0], next_coordinates_out
-        )
-        arm_coordinates_in = np.dot(
-            arm_settings["transform_matrices"][1], next_coordinates_in
-        )
+        arm_coordinates_out = np.dot(arm_settings["transform_matrices"][0], next_coordinates_out)
+        arm_coordinates_in = np.dot(arm_settings["transform_matrices"][1], next_coordinates_in)
 
         # move arm to next vial window using transformed vial coordinates
         try:
             if arm_settings["post_wash"]:
-                await asyncio.sleep(
-                    self.robotics_conf["wash_settings"]["submersed_time"]
-                )
+                await asyncio.sleep(self.robotics_conf["wash_settings"]["submersed_time"])
             await self.move_arm(
                 {
                     "x": arm_coordinates_out[0][0],
@@ -1513,9 +1332,7 @@ class RoboticsServer(EvolverNamespace):
                     "z": arm_settings["z"]["current"][0],
                 }
             )
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
             # add delay to allow ethanol to dry from influx needle
             if arm_settings["post_wash"]:
                 await asyncio.sleep(self.robotics_conf["wash_settings"]["dry_time"])
@@ -1526,9 +1343,7 @@ class RoboticsServer(EvolverNamespace):
                     "z": arm_settings["z"]["target"][0],
                 }
             )
-            await (
-                self.check_for_interrupt()
-            )  # hang here if pause is called or exit routine if exit command received
+            await self.check_for_interrupt()  # hang here if pause is called or exit routine if exit command received
             await self.move_arm(
                 {
                     "x": arm_coordinates_in[0][0],
@@ -1570,16 +1385,12 @@ class RoboticsServer(EvolverNamespace):
                     self.octoprint_instances[octoprint_name].connected = False
                 else:
                     self.octoprint_instances[octoprint_name].connected = True
-            self.robotics_status.OctoPrint[octoprint_name]["connection_status"] = (
-                self.octoprint_instances[octoprint_name].connected
-            )
+            self.robotics_status.OctoPrint[octoprint_name]["connection_status"] = self.octoprint_instances[octoprint_name].connected
         await session.close()
 
         # emit robotics status to all connected clients
         logging.info("robotics status broadcast %s" % asdict(self.robotics_status))
-        await self.sio.emit(
-            "broadcast", asdict(self.robotics_status), namespace="/robotics_evolver"
-        )
+        await self.sio.emit("broadcast", asdict(self.robotics_status), namespace="/robotics_evolver")
 
     async def on_connect(self, sid, environ, auth):
         """Called when client connects to server."""
@@ -1609,10 +1420,7 @@ class RoboticsServer(EvolverNamespace):
         """Exit the active robotics routine."""
 
         # if self.robotics_status.mode != 'idle' and self.robotics_status.mode != 'emergency_stop':
-        if (
-            self.robotics_status.mode in self.robotics_conf["modes"]["routines"]
-            or self.robotics_status.mode == "pause"
-        ):
+        if self.robotics_status.mode in self.robotics_conf["modes"]["routines"] or self.robotics_status.mode == "pause":
             self.robotics_status.mode = "exit"
             logger.info("Received exit request, exiting active routines.")
 
@@ -1641,21 +1449,14 @@ class RoboticsServer(EvolverNamespace):
         logger.info(data)
         # if data['mode'] in ['idle', 'dilution', 'pipetting', 'filling_vials', 'priming_influx', 'priming_efflux', 'pause', 'resume']:
         if "mode" in data:
-            if (
-                data["mode"] in self.robotics_conf["modes"]["routines"]
-                or data["mode"] in self.robotics_conf["modes"]["states"]
-            ):
+            if data["mode"] in self.robotics_conf["modes"]["routines"] or data["mode"] in self.robotics_conf["modes"]["states"]:
                 self.robotics_status.mode = data["mode"]
 
         if "prime_status" in data:
             if "influx" in data["prime_status"]:
-                self.robotics_status.prime_status["influx"] = data["prime_status"][
-                    "influx"
-                ]
+                self.robotics_status.prime_status["influx"] = data["prime_status"]["influx"]
             if "efflux" in data["prime_status"]:
-                self.robotics_status.prime_status["efflux"] = data["prime_status"][
-                    "efflux"
-                ]
+                self.robotics_status.prime_status["efflux"] = data["prime_status"]["efflux"]
 
         if "reset_xArm" in data:
             if not self.robotics_status.xArm.connected:
@@ -1687,10 +1488,7 @@ class RoboticsServer(EvolverNamespace):
             # pause detected, halt influx routine until pause is lifted or influx routine is stopped
             await self.sio.sleep(0.1)
 
-        if (
-            self.robotics_status.mode == "exit"
-            or self.robotics_status.mode == "emergency_stop"
-        ):
+        if self.robotics_status.mode == "exit" or self.robotics_status.mode == "emergency_stop":
             raise ExitRobotics()
 
     async def on_pipette_routine(self, sid, data: dict):
@@ -1700,7 +1498,9 @@ class RoboticsServer(EvolverNamespace):
             sid (str): session ID.
             data (dict): empty data strcuture to run the helper function. Currently not used"""
 
-        start_time = time.time()  # get start time of routine to later calculate total elapsed time, useful for clients to gauge routine duration
+        start_time = (
+            time.time()
+        )  # get start time of routine to later calculate total elapsed time, useful for clients to gauge routine duration
         # execute routine using pipette_helper function
         if self.robotics_status.mode == "idle":
             try:
@@ -1753,7 +1553,9 @@ class RoboticsServer(EvolverNamespace):
                 'wash' (bool): flag indicating whether to perform a wash step.
                 'hardware' (str): hardware to use for routine, 'syringe_pumps' or 'ipp'"""
 
-        start_time = time.time()  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
+        start_time = (
+            time.time()
+        )  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
         # execute prime_efflux_helper function
         if self.robotics_status.mode == "idle":
             try:
@@ -1820,12 +1622,11 @@ class RoboticsServer(EvolverNamespace):
         Returns:
             dict: contains the result of the prime_influx routine."""
 
-        start_time = time.time()  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
+        start_time = (
+            time.time()
+        )  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
         # execute routine using prime_influx_helper function
-        if (
-            self.robotics_status.mode == "idle"
-            and not self.robotics_status.prime_status["influx"]
-        ):
+        if self.robotics_status.mode == "idle" and not self.robotics_status.prime_status["influx"]:
             try:
                 logger.info("Priming syringe pumps")
                 self.robotics_status.mode = "priming_influx"
@@ -1874,7 +1675,9 @@ class RoboticsServer(EvolverNamespace):
         Returns:
             dict: contains the result of the prime_efflux routine."""
 
-        start_time = time.time()  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
+        start_time = (
+            time.time()
+        )  # get start time of influx routine to later calculate total elapsed time, useful for clients to gauge routine duration
         # execute prime_efflux_helper function
         if self.robotics_status.mode == "idle":
             try:
@@ -1940,9 +1743,7 @@ class RoboticsServer(EvolverNamespace):
                 self.robotics_status.mode = "dilution"
                 data["mode"] = "dilution"
                 await self.influx_snake_helper(data)
-                await asyncio.sleep(
-                    3
-                )  # add delay to give time for culture mixing prior to efflux
+                await asyncio.sleep(3)  # add delay to give time for culture mixing prior to efflux
                 await self.efflux_ipp_helper(data["commands"]["ipp_efflux_command"])
                 self.robotics_status.mode = "idle"
                 end_time = time.time()
@@ -2007,28 +1808,18 @@ class RoboticsServer(EvolverNamespace):
             self.on_override_robotics_status,
             namespace="/robotics_evolver",
         )
-        self.sio.on(
-            "stop_robotics", self.on_stop_robotics, namespace="/robotics_evolver"
-        )
+        self.sio.on("stop_robotics", self.on_stop_robotics, namespace="/robotics_evolver")
         self.sio.on(
             "reconnect_robotics",
             self.on_reconnect_robotics,
             namespace="/robotics_evolver",
         )
-        self.sio.on(
-            "pause_robotics", self.on_pause_robotics, namespace="/robotics_evolver"
-        )
-        self.sio.on(
-            "resume_robotics", self.on_resume_robotics, namespace="/robotics_evolver"
-        )
-        self.sio.on(
-            "exit_robotics", self.on_exit_robotics, namespace="/robotics_evolver"
-        )
+        self.sio.on("pause_robotics", self.on_pause_robotics, namespace="/robotics_evolver")
+        self.sio.on("resume_robotics", self.on_resume_robotics, namespace="/robotics_evolver")
+        self.sio.on("exit_robotics", self.on_exit_robotics, namespace="/robotics_evolver")
 
         # user defined robotics routines
-        self.sio.on(
-            "pipette_routine", self.on_pipette_routine, namespace="/robotics_evolver"
-        )
+        self.sio.on("pipette_routine", self.on_pipette_routine, namespace="/robotics_evolver")
         self.sio.on(
             "fill_vials_routine",
             self.on_fill_vials_routine,
@@ -2044,6 +1835,4 @@ class RoboticsServer(EvolverNamespace):
             self.on_prime_efflux_routine,
             namespace="/robotics_evolver",
         )
-        self.sio.on(
-            "dilution_routine", self.on_dilution_routine, namespace="/robotics_evolver"
-        )
+        self.sio.on("dilution_routine", self.on_dilution_routine, namespace="/robotics_evolver")

@@ -1,14 +1,15 @@
 #!/usr/local/bin/env python3.6
-import yaml
-import time
 import asyncio
-from multi_server import MultiServer
+import logging
+import os
 import socket
+import time
+
 import evolver_server
 import robotics_server
 import socketio
-import os
-import logging
+import yaml
+from multi_server import MultiServer
 
 EVOLVER_CONF_FILENAME = "conf.yml"
 ROBOTICS_CONF_FILENAME = "robotics_server_conf.yml"
@@ -75,7 +76,7 @@ if __name__ == "__main__":
             )
             connected = True
             logger.info("Connected to eVOLVER server")
-        except Exception as e:
+        except Exception:
             logger.info("Failed to connect to eVOLVER server. Retrying in 0.5 seconds.")
             time.sleep(0.5)
 
