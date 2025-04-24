@@ -1,0 +1,131 @@
+---
+# network/serial settings
+xArm_ip: "192.168.1.200"
+pump_serial_port: "/dev/tty.usbserial-AG0KB3HZ"
+
+# overflow/volume settings
+overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
+overflow_voltage_threshold: 0.33 # +/- value used in reference to overflow_voltage_step to account for noisy voltages
+overflow_trigger_map:
+  left: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3]
+  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4]
+
+# modes robotics can be in
+modes:
+  states:
+    - idle
+    - pause
+    - emergency_stop
+    - exit
+    - busy
+  routines:
+    - dilution
+    - pipetting
+    - filling_vials
+    - priming_influx
+    - priming_efflux
+
+# ipp settings
+ipp_mapping:
+  quad_0_efflux:
+    solenoid_numbers: [0, 1, 2]
+    ipp_number: 1
+  quad_1_efflux:
+    solenoid_numbers: [3, 4, 5]
+    ipp_number: 2
+  quad_2_efflux:
+    solenoid_numbers: [8, 9, 10]
+    ipp_number: 3
+  quad_3_efflux:
+    solenoid_numbers: [11, 12, 13]
+    ipp_number: 4
+
+ipp_efflux_settings:
+  frequency: 5 # Hz
+  duration: 30 # seconds
+  polarity: 0 # towards waste
+
+wash_settings:
+  submersed_time: 10 # seconds
+  dry_time: 10 # seconds
+
+pumps:
+  0:
+    name: base_media_0
+    type: media
+  1:
+    name: base_media_1
+    type: media
+  2:
+    name: base_media_2
+    type: media
+  3:
+    name: selection_1
+    type: drug
+
+# xarm settings
+# 750
+# 1000
+xarm_params:
+  roll: 180
+  pitch: 0
+  yaw: 0
+  speed: 500
+  mvacc: 500
+  safety_params:
+    max_speed: 1000
+    max_mvacc: 1000
+
+plane_calibration:
+  0:
+    plane_out:
+      vial0_x: 79
+      vial0_y: -471
+      vial17_x: 115.5
+      vial17_y: -381.2
+      z: 467
+    plane_in:
+      vial0_x: 74.5
+      vial0_y: -471
+      vial17_x: 111
+      vial17_y: -381.2
+      z: 429.5
+  1:
+    plane_out:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null
+    plane_in:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null
+  2:
+    plane_out:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null
+    plane_in:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null
+  3:
+    plane_out:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null
+    plane_in:
+      vial0_x: null
+      vial0_y: null
+      vial17_x: null
+      vial17_y: null
+      z: null

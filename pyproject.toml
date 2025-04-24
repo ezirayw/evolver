@@ -27,6 +27,9 @@ Repository = "https://github.com/ezirayw/evolver"
 [project.optional-dependencies]
 dev = []
 
+[tool.ruff]
+line-length=140
+
 [tool.pyright]
 venvPath = "/Users/ezirayimerwolle/.pyenv/versions"
 venv = "evolver"

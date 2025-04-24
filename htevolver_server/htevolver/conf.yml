@@ -131,7 +131,7 @@ parameters:
 # eVOLVER server parameter configurations
 broadcast_timing: 10
 num_sleeves: 16
-evolver_port: 8081
+port: 8081
 
 # RPi file locations and names
 calibrations_directory: calibrations
@@ -145,11 +145,3 @@ serial_end_incoming: end
 serial_port: "/dev/ttyAMA0"
 serial_baudrate: 9600
 serial_timeout: 2
-command_types:
-  # server to arduinos
-  request: 0
-  acknowledge: 1
-  # arduinos to server
-  sensor: 2
-  echo: 3
-  config: 4

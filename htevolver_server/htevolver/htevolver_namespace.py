@@ -3,7 +3,6 @@ import logging
 import os
 import struct
 import time
-from dataclasses import dataclass, field
 from typing import TypedDict
 
 import serial
@@ -11,9 +10,6 @@ import socketio
 import yaml
 
 logger = logging.getLogger(__name__)
-
-LOCATION = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
-EVOLVER_CONF_FILENAME = "conf.yml"
 
 
 class EvolverSerialError(Exception):
@@ -40,36 +36,31 @@ class BroadcastData(TypedDict, total=False):
     timestamp: float
 
 
-@dataclass
-class EvolverServer:
-    evolver_ip: str
-    sio: socketio.AsyncServer = field(default_factory=lambda: socketio.AsyncServer(always_connect=True))
-    calibrations_filename: str = field(default="calibrations.json")
-    evolver_conf: dict = field(default_factory=dict)
+class EvolverNamespace(socketio.AsyncNamespace):
+    def __init__(
+        self,
+        evolver_conf: dict,
+        server_ip: str,
+        namespace: str = "/evolver",
+        evolver_conf_path: str = os.path.join(os.path.expanduser("~"), "evolver_conf.yml"),
+        calibrations_dir: str = os.path.join(os.path.expanduser("~"), "calibrations"),
+    ):
+        super().__init__(namespace)
+        self.evolver_conf: dict = evolver_conf
+        self.server_ip: str = server_ip
+        self.evolver_conf_path: str = evolver_conf_path
+        self.calibrations_dir: str = calibrations_dir
 
-    serial_connection: serial.Serial = field(init=False)
-    command_queue: list[SerialCommand] = field(default_factory=list)
-    running_immediate: bool = field(default=False)
-    running_broadcast: bool = field(default=False)
-    request_tag: int = field(default=0)
-    acknowledge_tag: int = field(default=2)
-    sensor_tag: int = field(default=3)
-    echo_tag: int = field(default=4)
+        self.command_queue: list[SerialCommand] = []
+        self.running_immediate: bool = False
+        self.running_broadcast: bool = False
+        self.request_tag: int = 0
+        self.acknowledge_tag: int = 1
+        self.sensor_tag: int = 2
+        self.echo_tag: int = 3
+        self.config_tag: int = 4
 
-    def __post_init__(self):
-        """Initialize additional attributes after instance creation."""
-        with open(
-            os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__), EVOLVER_CONF_FILENAME)),
-            "r",
-        ) as ymlfile:
-            self.evolver_conf = yaml.safe_load(ymlfile)
-
-        self.request_tag = self.evolver_conf["command_types"]["request"]
-        self.acknowledge_tag = self.evolver_conf["command_types"]["acknowledge"]
-        self.sensor_tag = self.evolver_conf["command_types"]["sensor"]
-        self.echo_tag = self.evolver_conf["command_types"]["echo"]
-        self.config_tag = self.evolver_conf["command_types"]["config"]
-        self.serial_connection = serial.Serial(
+        self.serial_connection: serial.Serial = serial.Serial(
             port=self.evolver_conf["serial_port"],
             baudrate=self.evolver_conf["serial_baudrate"],
             timeout=self.evolver_conf["serial_timeout"],
@@ -139,7 +130,7 @@ class EvolverServer:
         # make sure requested parameter has a valid calibration
         if data.get("param") in self.evolver_conf["valid_calibrations"]:
             # find the calibration file for the requested parameter
-            calibration_dir = os.path.join(LOCATION, "calibrations")
+            calibration_dir = self.calibrations_dir
             calibration_files = [filename for filename in os.listdir(calibration_dir) if data.get("param") in filename]
 
             if not calibration_files:
@@ -153,19 +144,18 @@ class EvolverServer:
                 calibration_data = json.load(file)
 
             # Send the calibration data back to the client
-            await self.sio.emit(
-                "receivecalibration",
-                {"parameter": data.get("param"), "calibration": calibration_data},
-                to=sid,
-                namespace="/default_evolver",
-            )
+            await self.emit("receivecalibration", {"parameter": data.get("param"), "calibration": calibration_data}, to=sid)
             logger.info(f"Sent calibration data for {data.get('param')} to client")
         else:
             # Parameter doesn't have valid calibration
-            await self.sio.emit(
-                "receivecalibration", {"parameter": data.get("param"), "calibration": "error"}, to=sid, namespace="/default_evolver"
-            )
+            await self.emit("receivecalibration", {"parameter": data.get("param"), "calibration": "error"}, to=sid)
             logger.warning(f"No valid calibration found for parameter: {data.get('param')}")
+
+    def update_conf(self):
+        """Updates namespace config by loading the contents of the robotics_conf file."""
+
+        with open(self.evolver_conf_path, "r") as conf:
+            self.evolver_conf = yaml.safe_load(conf)
 
     async def run_commands(self, phase: int):
         data: dict[str, list[int]] = {}
@@ -355,12 +345,6 @@ class EvolverServer:
         else:
             return None
 
-    def attach(self, app):
-        """
-        Attach the server to the web application and setup the serial communication
-        """
-        self.sio.attach(app)
-
     def get_evolver_status(self):
         return {
             "running_immediate": self.running_immediate,
@@ -416,15 +400,9 @@ class EvolverServer:
 
         # Build broadcast packet
         broadcast_data["config"] = self.evolver_conf["parameters"][phase_string]
-        broadcast_data["ip"] = self.evolver_ip
+        broadcast_data["ip"] = self.server_ip
         broadcast_data["timestamp"] = time.time()
         logging.info("broadcasting %s", (broadcast_data))
-        await self.sio.emit("broadcast", broadcast_data, namespace="/default_evolver")
+        await self.emit("broadcast", broadcast_data)
         self.running_broadcast = False
         return True
-
-    def setup_event_handlers(self):
-        self.sio.on("connect", self.on_connect, namespace="/default_evolver")
-        self.sio.on("disconnect", self.on_disconnect, namespace="/default_evolver")
-        self.sio.on("command", self.on_command, namespace="/default_evolver")
-        self.sio.on("getcalibration", self.on_getcalibration, namespace="/default_evolver")
