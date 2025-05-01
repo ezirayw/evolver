@@ -133,7 +133,7 @@ def routine_decorator(routine_type: RoboticsRoutines):
 @dataclass
 class PumpConfig:
     position_id: int
-    hardware: XCaliburD
+    hardware: XCaliburD | None
     ports: dict[int, FluidTypes] = field(default_factory=lambda: {1: FluidTypes.EMPTY, 2: FluidTypes.EMPTY})
     empty: bool = field(default=True)
     active_port: int = field(default=1)
@@ -177,7 +177,7 @@ class PumpConfig:
 
 @dataclass
 class PipetteHead:
-    pumps: list[PumpConfig] = field(default_factory=lambda: [])
+    pumps: list[PumpConfig]
     pump_num: int = field(default=0)
     universal_fluids: dict[FluidTypes, bool] = field(default_factory=lambda: {FluidTypes.EMPTY: True})
     num_windows: int = field(default=0)
@@ -200,17 +200,6 @@ class PipetteHead:
                         f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
                     )
 
-            if not self.pumps:
-                self.pumps.append(
-                    PumpConfig(
-                        position_id=position_index,
-                        hardware=XCaliburD(
-                            com_link=TecanAPISerial(position_index, ser_port=serial_port, ser_baud=9600),
-                        ),
-                        ports=port_config,
-                    )
-                )
-                return
             if self.pumps[position_index].ports != port_config:
                 self.pumps[position_index] = PumpConfig(
                     position_id=position_index,
@@ -219,7 +208,6 @@ class PipetteHead:
                     ),
                     ports=port_config,
                 )
-                return
 
         for pump in self.pumps:
             pump.check_empty()
@@ -386,10 +374,37 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             vial_window=[],
             xArm=xArmStatus(),
         )
-
         self.xArm_command_queue: list[xArmCoordinate] = []
-        self.pipette_head: PipetteHead = PipetteHead()
-        self.pipette_head.update(self.robotics_conf)
+        pumps: list[PumpConfig] = []
+        for position_index in range(4):
+            port_config: dict[int, FluidTypes] = {}
+            for port, fluid_type in self.robotics_conf["pipette_head_pumps"][position_index].items():
+                if fluid_type in FluidTypes.__members__:
+                    port_config[port] = FluidTypes[fluid_type]
+                else:
+                    port_config[port] = FluidTypes.EMPTY
+                    logger.warning(
+                        f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
+                    )
+            if self.robotics_conf["pipette_head_pumps"][position_index]["connected"]:
+                pumps.append(
+                    PumpConfig(
+                        position_id=position_index,
+                        hardware=XCaliburD(
+                            com_link=TecanAPISerial(position_index, ser_port=self.robotics_conf["serial_port"], ser_baud=9600),
+                        ),
+                        ports=port_config,
+                    )
+                )
+            else:
+                pumps.append(
+                    PumpConfig(
+                        position_id=position_index,
+                        hardware=None,
+                        ports=port_config,
+                    )
+                )
+        self.pipette_head: PipetteHead = PipetteHead(pumps)
 
         # initialize SmartStations
         self.stations: list[SmartStationRobotics] = []
@@ -435,8 +450,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         if self.status.state == RoboticsState.BUSY:
             self.status.state = RoboticsState.PAUSE
             self.arm.set_state(3)
-            for tecan_pump in self.pipette_head.pumps:
-                tecan_pump.hardware.terminateCmd()
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    pump.hardware.terminateCmd()
         logger.info("Robotics namespace put into PAUSE state")
 
     async def on_resume(self, sid):
@@ -451,8 +467,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         if self.status.state == RoboticsState.PAUSE:
             self.status.state = RoboticsState.BUSY
             self.arm.set_state(0)
-            for tecan_pump in self.pipette_head.pumps:
-                tecan_pump.hardware.sendRcv("", execute=True)
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    pump.hardware.sendRcv("", execute=True)
         logger.info("Robotics namespace put back into BUSY state, resuming previously paused activity.")
 
     async def on_stop(self, sid):
@@ -563,10 +580,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
 
         self.pipette_head.update()
-        for index, tecan_pump in enumerate(self.pipette_head.pumps):
+        for index, pump in enumerate(self.pipette_head.pumps):
             if not self.pipette_head.pumps[index].empty:
                 try:
-                    tecan_pump.hardware.init()
+                    if pump.hardware:
+                        pump.hardware.init()
                 except (SyringeError, SyringeTimeout) as e:
                     logger.warning(
                         f"Error trying to initialize {self.pipette_head.pumps[index].position_id} in position {index}: {e}"
@@ -885,12 +903,15 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             SyringeTimeout: If a syringe operation times out.
         """
         for index, command in enumerate(pump_commands):
+            if not self.pipette_head.pumps[index].hardware:
+                continue
             try:
                 method = getattr(self.pipette_head.pumps[index], method_name)
 
                 # wrapper function that adds the command to the pump's command chain and calls executeChain() & waitReady()
                 def execute_pump_method(pump_method, method_args):
                     pump_method(*method_args)
+
                     delay = self.pipette_head.pumps[index].hardware.executeChain()
                     self.pipette_head.pumps[index].hardware.waitReady(delay)
 
@@ -1024,9 +1045,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         logger.info("stopping any current syringe pumps and xArm operations")
         try:
-            for tecan_pump in self.pipette_head.pumps:
-                tecan_pump.hardware.terminateCmd()
-                tecan_pump.hardware.resetChain()
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    pump.hardware.terminateCmd()
+                    pump.hardware.resetChain()
             self.arm.set_state(4)
         except (SyringeError, SyringeTimeout) as e:
             logger.error(f"error encountered trying to call stop_robotics(): {e}")
@@ -1041,9 +1063,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         logger.info("stopping any current syringe pumps and xArm operations")
         try:
             self.stop_robotics()
-            for tecan_pump in self.pipette_head.pumps:
-                if hasattr(tecan_pump, "hardware") and tecan_pump.hardware is not None:
-                    del tecan_pump.hardware
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    del pump.hardware
             self.arm.emergency_stop()
             self.arm.disconnect()
         except (SyringeError, SyringeTimeout) as e:

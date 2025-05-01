@@ -1,7 +1,7 @@
 ---
 # network/serial settings
 xArm_ip: "192.168.1.200"
-pump_serial_port: "/dev/tty.usbserial-AG0KB3HZ"
+serial_port: "/dev/tty.usbserial-AG0KB3HZ"
 
 # overflow/volume settings
 overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
@@ -52,22 +52,29 @@ wash_settings:
 pipette_head_pumps:
   0:
     hardware: XCaliburD
-    port_1: media
-    port_2: sterilize
+    ports:
+      1: media
+      2: sterilize
+    connected: False
   1:
     hardware: XCaliburD
-    port_1: media
-    port_2: sterilize
+    ports:
+      1: media
+      2: sterilize
+    connected: False
   2:
     hardware: XCaliburD
-    port_1: media
-    port_2: sterilize
+    ports:
+      1: media
+      2: sterilize
+    connected: False
 
   3:
     hardware: XCaliburD
-    port_1: media
-    port_2: sterilize
-
+    ports:
+      1: media
+      2: sterilize
+    connected: False
 # xarm settings
 # 750
 # 1000
