@@ -4,3 +4,4 @@
 .zed
 .python-version
 .DS_Store
+/dist

@@ -8,8 +8,8 @@ import socketio
 import yaml
 from aiohttp import web
 from aiohttp.web_app import Application
+from evolver_namespace_server import EvolverServerNamespace
 
-from .htevolver_namespace_server import HTEvolverServerNamespace
 from .robotics_namespace_server import RoboticsServerNamespace
 
 EVOLVER_CONF_FILENAME = "conf.yml"
@@ -110,7 +110,7 @@ async def init_app():
     sio = socketio.AsyncServer()
     sio.attach(app)
 
-    app["evolver_namespace"] = HTEvolverServerNamespace(evolver_conf, ip)
+    app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, ip)
     app["robotics_namespace"] = RoboticsServerNamespace(robotics_conf)
     sio.register_namespace(app["evolver_namespace"])
     sio.register_namespace(app["robotics_namespace"])

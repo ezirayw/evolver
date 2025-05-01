@@ -32,8 +32,10 @@ scikit-image==0.25.2
 scipy==1.15.2
 simple-websocket==1.1.0
 six==1.17.0
-tecancavro @ file:///Users/ezirayimerwolle/Documents/GitHub.tmp/Khalil_Lab/tecancavro/dist/tecancavro-0.1.0-py3-none-any.whl#sha256=90ef2929f037aec42f155c5453ac8efd3373921298c679fd28166f08a73e5942
+tecancavro@ file:///Users/ezirayimerwolle/Documents/GitHub.tmp/Khalil_Lab/tecancavro/dist/tecancavro-0.1.0-py3-none-any.whl#sha256=90ef2929f037aec42f155c5453ac8efd3373921298c679fd28166f08a73e5942
 tifffile==2025.3.30
 wsproto==1.2.0
 xarm-python-sdk==1.15.3
 yarl==1.20.0
+
+[dev]

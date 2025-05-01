@@ -4,13 +4,13 @@ from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 import numpy as np
-from htevolver_namespace_client import HTEvolverNamespace
+from evolver_namespace_client import EvolverClientNamespace
 
 logger = logging.getLogger(__name__)
 
 
 def collect_voltage_readings(
-    htevolver_client: HTEvolverNamespace,
+    htevolver_client: EvolverClientNamespace,
     container_list: list[int],
     sensor_type: str,
     station_id=None,

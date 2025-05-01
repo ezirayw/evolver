@@ -11,7 +11,8 @@ import yaml
 from exceptions import ExitRobotics, OperationEventError, RoboticsError, xArmError
 from shared import FluidTypes, RoboticsRoutines, RoboticsState, RoboticsStatus, ServerResult, xArmStatus
 from skimage.transform import EuclideanTransform
-from tecancavro.models import SyringeError, SyringeTimeout, XCaliburD
+from tecancavro.models import XCaliburD
+from tecancavro.syringe import SyringeError, SyringeTimeout
 from tecancavro.transport import TecanAPISerial
 from xarm.wrapper import XArmAPI
 
@@ -194,7 +195,9 @@ class PipetteHead:
                     port_config[port] = FluidTypes[fluid_type]
                 else:
                     port_config[port] = FluidTypes.EMPTY
-                    logger.warning(f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}")
+                    logger.warning(
+                        f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
+                    )
 
             if self.pumps[position_index].ports != port_config:
                 self.pumps[position_index] = PumpConfig(
@@ -301,7 +304,9 @@ class SmartStationRobotics:
     xArmPlane_out: xArmPlane
     wash_location: VialCoordinate = field(default_factory=lambda: VialCoordinate(x=72, y=-29))
     wash_depth: float = field(init=False)
-    vial_map: list[list[int]] = field(default_factory=lambda: [[0, 1, 2, 3, 4, 5], [11, 10, 9, 8, 7, 6], [12, 13, 14, 15, 16, 17]])
+    vial_map: list[list[int]] = field(
+        default_factory=lambda: [[0, 1, 2, 3, 4, 5], [11, 10, 9, 8, 7, 6], [12, 13, 14, 15, 16, 17]]
+    )
 
     def update(self, robotics_conf: dict):
         """Update the SmartStation xArmPlane calibration points based on the input configuration."""
@@ -310,11 +315,22 @@ class SmartStationRobotics:
                 getattr(self.xArmPlane_out, calibration_point)
                 != robotics_conf["plane_calibration"][self.id]["plane_out"][calibration_point]
             ):
-                setattr(self.xArmPlane_out, calibration_point, robotics_conf["plane_calibration"][self.id]["plane_out"][calibration_point])
+                setattr(
+                    self.xArmPlane_out,
+                    calibration_point,
+                    robotics_conf["plane_calibration"][self.id]["plane_out"][calibration_point],
+                )
 
         for calibration_point in robotics_conf["plane_calibration"][self.id]["plane_in"]:
-            if getattr(self.xArmPlane_in, calibration_point) != robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point]:
-                setattr(self.xArmPlane_out, calibration_point, robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point])
+            if (
+                getattr(self.xArmPlane_in, calibration_point)
+                != robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point]
+            ):
+                setattr(
+                    self.xArmPlane_out,
+                    calibration_point,
+                    robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point],
+                )
 
 
 @dataclass
@@ -539,7 +555,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 try:
                     tecan_pump.hardware.init()
                 except (SyringeError, SyringeTimeout) as e:
-                    logger.warning(f"Error trying to initialize {self.pipette_head.pumps[index].position_id} in position {index}: {e}")
+                    logger.warning(
+                        f"Error trying to initialize {self.pipette_head.pumps[index].position_id} in position {index}: {e}"
+                    )
 
         logger.info("Robotics namespace initialized non-empty XCaliburD pumps on the PipetteHead")
 
