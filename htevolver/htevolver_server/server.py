@@ -129,7 +129,7 @@ async def main():
     app = await init_app()
 
     # Setup and start the web server
-    port = app["evolver_conf"].get("evolver_port", 8081)
+    port = app["port"]
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
@@ -140,6 +140,7 @@ async def main():
     # Keep the server running indefinitely
     try:
         while True:
+            logger.debug("yo")
             await asyncio.sleep(3600)  # Sleep for an hour
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Shutting down HT-eVOLVER server")

@@ -378,7 +378,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         pumps: list[PumpConfig] = []
         for position_index in range(4):
             port_config: dict[int, FluidTypes] = {}
-            for port, fluid_type in self.robotics_conf["pipette_head_pumps"][position_index].items():
+            for port, fluid_type in self.robotics_conf["pipette_head_pumps"][position_index]["ports"].items():
                 if fluid_type in FluidTypes.__members__:
                     port_config[port] = FluidTypes[fluid_type]
                 else:
@@ -408,14 +408,14 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         # initialize SmartStations
         self.stations: list[SmartStationRobotics] = []
-        plane_calibration = self.robotics_conf["xArmPlane_calibration"]
+        plane_calibration = self.robotics_conf["plane_calibration"]
         for station_id in range(4):
-            plane_out = xArmPlane(**plane_calibration[station_id]["xArmPlane_out"])
-            plane_in = xArmPlane(**plane_calibration[station_id]["xArmPlane_in"])
+            plane_out = xArmPlane(**plane_calibration[station_id]["plane_out"])
+            plane_in = xArmPlane(**plane_calibration[station_id]["plane_in"])
             self.stations.append(SmartStationRobotics(station_id, plane_out, plane_in))
 
         # initialize XArm instance
-        self.arm = XArmAPI(self.robotics_conf["xarm_ip"], enable_report=True)
+        self.arm = XArmAPI(self.robotics_conf["xArm_ip"], enable_report=True, do_not_open=False)
         self.setup_xArm()
         self.status.xArm.connected = self.arm.connected
         self.register_callback()
