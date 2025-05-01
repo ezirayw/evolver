@@ -49,19 +49,24 @@ wash_settings:
   submersed_time: 10 # seconds
   dry_time: 10 # seconds
 
-pumps:
+pipette_head_pumps:
   0:
-    name: base_media_0
-    type: media
+    hardware: XCaliburD
+    port_1: media
+    port_2: sterilize
   1:
-    name: base_media_1
-    type: media
+    hardware: XCaliburD
+    port_1: media
+    port_2: sterilize
   2:
-    name: base_media_2
-    type: media
+    hardware: XCaliburD
+    port_1: media
+    port_2: sterilize
+
   3:
-    name: selection_1
-    type: drug
+    hardware: XCaliburD
+    port_1: media
+    port_2: sterilize
 
 # xarm settings
 # 750
