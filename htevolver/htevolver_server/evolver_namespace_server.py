@@ -8,7 +8,8 @@ from dataclasses import asdict
 import serial
 import socketio
 import yaml
-from shared import BroadcastData, CommandTags, EvolverCommand, EvolverStatus, SerialCommand
+
+from htevolver.shared import BroadcastData, CommandTags, EvolverCommand, EvolverStatus, SerialCommand
 
 logger = logging.getLogger(__name__)
 

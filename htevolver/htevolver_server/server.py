@@ -8,9 +8,9 @@ import socketio
 import yaml
 from aiohttp import web
 from aiohttp.web_app import Application
-from evolver_namespace_server import EvolverServerNamespace
 
-from .robotics_namespace_server import RoboticsServerNamespace
+from htevolver.htevolver_server.evolver_namespace_server import EvolverServerNamespace
+from htevolver.htevolver_server.robotics_namespace_server import RoboticsServerNamespace
 
 EVOLVER_CONF_FILENAME = "conf.yml"
 ROBOTICS_CONF_FILENAME = "robotics_server_conf.yml"

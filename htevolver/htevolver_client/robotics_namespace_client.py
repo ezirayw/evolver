@@ -2,7 +2,8 @@ import logging
 import time
 
 import socketio
-from shared import HTEvolverStatus, RoboticsRoutines, RoboticsState, RoboticsStatus, xArmStatus
+
+from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState, RoboticsStatus, xArmStatus
 
 logger = logging.getLogger(__name__)
 

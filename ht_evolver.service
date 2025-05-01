@@ -3,7 +3,7 @@ Description=Start HT_eVOLVER server
 After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/pi/evolver/evolver/evolver.py
+ExecStart=/home/pi/htevolver/bin/python /home/pi/evolver/htevolver/htevolver_server/server.py
 Restart=always
 RestartSec=10s
 KillMode=process
