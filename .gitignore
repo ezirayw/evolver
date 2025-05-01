@@ -5,3 +5,4 @@
 .python-version
 .DS_Store
 /dist
+/__py_cache__

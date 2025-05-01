@@ -12,10 +12,10 @@ from aiohttp.web_app import Application
 from htevolver.htevolver_server.evolver_namespace_server import EvolverServerNamespace
 from htevolver.htevolver_server.robotics_namespace_server import RoboticsServerNamespace
 
-EVOLVER_CONF_FILENAME = "conf.yml"
+EVOLVER_CONF_FILENAME = "evolver_conf.yml"
 ROBOTICS_CONF_FILENAME = "robotics_server_conf.yml"
 
-logger = logging.getLogger("ht_evolver")
+logger = logging.getLogger("htevolver")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -89,8 +89,8 @@ async def start_background_tasks(app):
 async def init_app():
     """Initialize the web application with all required components"""
     # Load configs
-    evolver_conf_path = os.path.realpath(os.path.join(os.getcwd(), "htevolver", EVOLVER_CONF_FILENAME))
-    robotics_conf_path = os.path.realpath(os.path.join(os.getcwd(), "robotics", ROBOTICS_CONF_FILENAME))
+    evolver_conf_path = os.path.realpath(os.path.join(os.getcwd(), EVOLVER_CONF_FILENAME))
+    robotics_conf_path = os.path.realpath(os.path.join(os.getcwd(), ROBOTICS_CONF_FILENAME))
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:
