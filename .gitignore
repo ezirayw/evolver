@@ -6,3 +6,4 @@
 .DS_Store
 /dist
 /__py_cache__
+/*.egg-info
