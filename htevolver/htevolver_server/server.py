@@ -13,14 +13,14 @@ from htevolver.htevolver_server.evolver_namespace_server import EvolverServerNam
 from htevolver.htevolver_server.robotics_namespace_server import RoboticsServerNamespace
 
 EVOLVER_CONF_FILENAME = "evolver_conf.yml"
-ROBOTICS_CONF_FILENAME = "robotics_server_conf.yml"
+ROBOTICS_CONF_FILENAME = "robotics_conf.yml"
 
 logger = logging.getLogger("htevolver")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
     datefmt="%Y-%m-%d %H:%M:%S",
-    filename="/home/pi/ht_evolver.log",
-    level=logging.INFO,
+    filename="/home/pi/htevolver.log",
+    level=logging.DEBUG,
 )
 logging.getLogger("engineio.client").setLevel(logging.ERROR)
 logging.getLogger("socketio.client").setLevel(logging.ERROR)
@@ -94,9 +94,11 @@ async def init_app():
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:
+        logger.debug(evolver_conf_path)
         evolver_conf = yaml.safe_load(ymlfile)
 
     with open(robotics_conf_path, "r") as ymlfile:
+        logger.debug(robotics_conf_path)
         robotics_conf = yaml.safe_load(ymlfile)
 
     app = web.Application()
