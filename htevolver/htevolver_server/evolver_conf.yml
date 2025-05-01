@@ -142,6 +142,6 @@ temp_calibration_directory: temp
 # Serial communication
 serial_end_outgoing: "_!"
 serial_end_incoming: end
-serial_port: "/dev/ttyAMA0"
+serial_port: "/dev/ttyS0"
 serial_baudrate: 9600
 serial_timeout: 2

@@ -89,8 +89,8 @@ async def start_background_tasks(app):
 async def init_app():
     """Initialize the web application with all required components"""
     # Load configs
-    evolver_conf_path = os.path.realpath(os.path.join(os.getcwd(), EVOLVER_CONF_FILENAME))
-    robotics_conf_path = os.path.realpath(os.path.join(os.getcwd(), ROBOTICS_CONF_FILENAME))
+    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver/htevolver/htevolver_server", EVOLVER_CONF_FILENAME))
+    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/evolver/htevolver/htevolver_server", ROBOTICS_CONF_FILENAME))
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:

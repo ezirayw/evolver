@@ -200,7 +200,7 @@ class PipetteHead:
                         f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
                     )
 
-            if self.pumps[position_index].ports != port_config:
+            if not self.pumps or self.pumps[position_index].ports != port_config:
                 self.pumps[position_index] = PumpConfig(
                     position_id=position_index,
                     hardware=XCaliburD(
