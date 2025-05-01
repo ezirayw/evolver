@@ -200,7 +200,18 @@ class PipetteHead:
                         f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
                     )
 
-            if not self.pumps or self.pumps[position_index].ports != port_config:
+            if not self.pumps:
+                self.pumps.append(
+                    PumpConfig(
+                        position_id=position_index,
+                        hardware=XCaliburD(
+                            com_link=TecanAPISerial(position_index, ser_port=serial_port, ser_baud=9600),
+                        ),
+                        ports=port_config,
+                    )
+                )
+                return
+            if self.pumps[position_index].ports != port_config:
                 self.pumps[position_index] = PumpConfig(
                     position_id=position_index,
                     hardware=XCaliburD(
@@ -208,6 +219,7 @@ class PipetteHead:
                     ),
                     ports=port_config,
                 )
+                return
 
         for pump in self.pumps:
             pump.check_empty()
