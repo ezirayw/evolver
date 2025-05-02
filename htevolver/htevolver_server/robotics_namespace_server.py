@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import time
 from dataclasses import asdict, dataclass, field
 
@@ -485,8 +484,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
     def __init__(
         self,
         robotics_conf: dict,
+        robotics_conf_path: str,
         namespace: str = "/robotics",
-        robotics_conf_path: str = os.path.join(os.path.expanduser("~"), "robotics_conf.yml"),
     ):
         super().__init__(namespace)
         self.robotics_conf: dict = robotics_conf

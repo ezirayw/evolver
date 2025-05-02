@@ -97,8 +97,8 @@ async def background_tasks(app):
 def init_app():
     """Initialize the web application with all required components"""
     # Load configs
-    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver/htevolver/htevolver_server", EVOLVER_CONF_FILENAME))
-    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/evolver/htevolver/htevolver_server", ROBOTICS_CONF_FILENAME))
+    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", EVOLVER_CONF_FILENAME))
+    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", ROBOTICS_CONF_FILENAME))
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:
@@ -116,8 +116,8 @@ def init_app():
     sio = socketio.AsyncServer()
     sio.attach(app)
 
-    app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, evolver_conf["ip"])
-    app["robotics_namespace"] = RoboticsServerNamespace(robotics_conf)
+    app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, evolver_conf_path)
+    app["robotics_namespace"] = RoboticsServerNamespace(robotics_conf, robotics_conf_path)
     sio.register_namespace(app["evolver_namespace"])
     sio.register_namespace(app["robotics_namespace"])
 

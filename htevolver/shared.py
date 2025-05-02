@@ -43,7 +43,6 @@ class CommandTags(Enum):
 
 @dataclass
 class BroadcastData:
-    ip: str = field(default="")
     phase: int = field(default=0)
     timestamp: float = field(default=0.0)
     data: dict[str, list[int]] = field(default_factory=dict)

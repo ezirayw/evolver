@@ -24,9 +24,8 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
     def __init__(
         self,
         evolver_conf: dict,
-        server_ip: str,
+        evolver_conf_path: str,
         namespace: str = "/evolver",
-        evolver_conf_path: str = os.path.join(os.path.expanduser("~"), "evolver_conf.yml"),
         calibrations_dir: str = os.path.join(os.path.expanduser("~"), "calibrations"),
     ):
         super().__init__(namespace)
@@ -465,7 +464,6 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             phase=self.status.phase,
             data=data,
             config=self.evolver_conf["parameters"][f"phase_{phase}"],
-            ip=self.evolver_conf["ip"],
             timestamp=time.time(),
         )
         logging.info(f"eVOLVER Broadcast: {broadcast_data}")
