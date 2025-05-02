@@ -356,6 +356,21 @@ class StationPumpCommands:
     vial_17: dict[str, int] = field(default_factory=lambda: {})
 
 
+@dataclass
+class xArm:
+    arm_api: XArmAPI
+    status: xArmStatus
+    ip: str
+    connect: bool
+    roll: int
+    pitch: int
+    yaw: int
+    speed: int
+    mvacc: int
+    max_speed: int = field(default=1000)
+    max_mvacc: int = field(default=1000)
+
+
 class RoboticsServerNamespace(socketio.AsyncNamespace):
     def __init__(
         self,
@@ -386,7 +401,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                     logger.warning(
                         f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
                     )
-            if self.robotics_conf["pipette_head_pumps"][position_index]["connected"]:
+            if self.robotics_conf["pipette_head_pumps"][position_index]["connect"]:
                 pumps.append(
                     PumpConfig(
                         position_id=position_index,
@@ -415,9 +430,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             self.stations.append(SmartStationRobotics(station_id, plane_out, plane_in))
 
         # initialize XArm instance
-        self.arm = XArmAPI(self.robotics_conf["xArm_ip"], enable_report=True, do_not_open=False)
+        self.arm = XArmAPI(
+            self.robotics_conf["xArm"]["ip"], enable_report=True, do_not_open=self.robotics_conf["xArm"]["connect"]
+        )
+        self.status.xArm.connected = self.robotics_conf["xArm"]["connect"]
         self.setup_xArm()
-        self.status.xArm.connected = self.arm.connected
         self.register_callback()
         logger.info("robotics_evolver server initialized")
 
@@ -554,6 +571,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
         """
         self.arm.connect()
+        self.status.xArm.connected = True
         logger.info("Robotics namespace reconnected to xArm.")
 
     async def on_reset_xArm(self, sid):
@@ -1102,7 +1120,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         if code == 0:
             angles[3] = -(angles[1] + angles[2])
             self.arm.set_servo_angle(angle=angles, wait=True)
-        self.status.xArm.connected = self.arm.connected
 
     def reset_xArm(self):
         """Resets the xArm to clear errors and reset position.
@@ -1134,21 +1151,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
 
         self.load_conf()
-        xarm_params = self.robotics_conf["xarm_params"]
-
+        xarm_config = self.robotics_conf["xArm"]["params"]
+        if xarm_config["params"]["speed"] > 1000:
+            raise xArmError(f"Configured xArm speed parameter too high: {xarm_config['params']['speed']}, bring it under 1000")
+        if xarm_config["params"]["mvacc"] > 1000:
+            raise xArmError(f"Configured xArm mvacc parameter too high: {xarm_config['params']['mvacc']}, bring it under 1000")
         if self.status.xArm.arm_state == 4:
             raise xArmError("xArm in stop state, requires reset")
-        else:
-            result = self.arm.set_position(
-                x=coordinate.x,
-                y=coordinate.y,
-                z=coordinate.z,
-                roll=xarm_params["roll"],
-                pitch=xarm_params["pitch"],
-                yaw=xarm_params["yaw"],
-                speed=xarm_params["speed"],
-                mvacc=xarm_params["mvacc"],
-                wait=True,
-            )
-            if result < 0:
-                raise xArmError(f"xArm error detected during move_xarm(): {result}")
+
+        result = self.arm.set_position(
+            x=coordinate.x,
+            y=coordinate.y,
+            z=coordinate.z,
+            roll=xarm_config["params"]["roll"],
+            pitch=xarm_config["params"]["pitch"],
+            yaw=xarm_config["params"]["yaw"],
+            speed=xarm_config["params"]["speed"],
+            mvacc=xarm_config["params"]["mvacc"],
+            wait=True,
+        )
+        if result < 0:
+            raise xArmError(f"xArm error detected during move_xarm(): {result}")

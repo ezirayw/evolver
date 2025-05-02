@@ -1,7 +1,7 @@
 import asyncio
+import contextlib
 import logging
 import os
-import socket
 import time
 
 import socketio
@@ -42,17 +42,20 @@ async def shutdown(app):
 async def broadcast_loop(app: Application):
     """Background task for periodic broadcasting"""
 
-    last_time = None
+    last_time = 0.0
     while True:
         current_time = time.time()
-        evolver_status = app["evolver_namespace"].get_evolver_status()
+        timing = app["broadcast_timing"]
+        logger.debug(timing)
 
         if (
-            (last_time is None or current_time - last_time >= app["evolver_conf"]["broadcast_timing"])
-            and not evolver_status["running_immediate"]
-            and not evolver_status["running_broadcast"]
+            (last_time == 0.0 or (current_time - last_time >= app["broadcast_timing"]))
+            and not app["evolver_namespace"].status.running_immediate
+            and not app["evolver_namespace"].status.running_broadcast
         ):
+            logger.info("starting broadcast loop")
             start_time = time.time()
+
             await app["robotics_namespace"].broadcast()
             result = await app["evolver_namespace"].broadcast(0)
             if not result:
@@ -72,21 +75,26 @@ async def broadcast_loop(app: Application):
                 continue
 
             end_time = time.time()
+            last_time = start_time
             elapsed_time = end_time - start_time
             logger.info(f"total broadcast processing time: {elapsed_time}")
-
-            last_time = time.time()
 
         # Non-blocking sleep to let the event loop handle other tasks
         await asyncio.sleep(0.1)
 
 
-async def start_background_tasks(app):
+async def background_tasks(app):
     """Start background tasks after app startup"""
     app["broadcast_task"] = asyncio.create_task(broadcast_loop(app))
 
+    yield
 
-async def init_app():
+    app["broadcast_task"].cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await app["broadcast_task"]
+
+
+def init_app():
     """Initialize the web application with all required components"""
     # Load configs
     evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver/htevolver/htevolver_server", EVOLVER_CONF_FILENAME))
@@ -103,48 +111,28 @@ async def init_app():
 
     app = web.Application()
     app["port"] = evolver_conf["port"]
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    ip = s.getsockname()[0]
-    app["ip"] = ip
-    s.close()
+    app["broadcast_timing"] = evolver_conf["broadcast_timing"]
 
     sio = socketio.AsyncServer()
     sio.attach(app)
 
-    app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, ip)
+    app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, evolver_conf["ip"])
     app["robotics_namespace"] = RoboticsServerNamespace(robotics_conf)
     sio.register_namespace(app["evolver_namespace"])
     sio.register_namespace(app["robotics_namespace"])
 
-    # Set up startup and shutdown handlers
-    app.on_startup.append(start_background_tasks)
-    app.on_shutdown.append(shutdown)
+    # broadcast_task = web.AppKey("broadcast_task", asyncio.Task[None])
+    app.cleanup_ctx.append(background_tasks)
 
     return app
 
 
-async def main():
+def main():
     """Main entry point for the application"""
-    app = await init_app()
-
-    # Setup and start the web server
-    port = app["port"]
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-
-    logger.info(f"Starting HT-eVOLVER server on port {port}")
-    await site.start()
-
-    # Keep the server running indefinitely
-    try:
-        while True:
-            logger.debug("yo")
-            await asyncio.sleep(3600)  # Sleep for an hour
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.info("Shutting down HT-eVOLVER server")
+    app = init_app()
+    logger.info(f"Starting HT-eVOLVER server on port {app['port']}")
+    web.run_app(app, port=app["port"])
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

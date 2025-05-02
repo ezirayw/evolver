@@ -1,29 +1,29 @@
 ---
-# network/serial settings
-xArm_ip: "192.168.1.200"
-serial_port: "/dev/tty.usbserial-AG0KB3HZ"
+xArm:
+  ip: "192.168.1.200"
+  connect: False
+  params:
+    roll: 180
+    pitch: 0
+    yaw: 0
+    speed: 500
+    mvacc: 500
+  safety_params:
+    max_speed: 1000
+    max_mvacc: 1000
 
-# overflow/volume settings
-overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
-overflow_voltage_threshold: 0.33 # +/- value used in reference to overflow_voltage_step to account for noisy voltages
-overflow_trigger_map:
-  left: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3]
-  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4]
-
-# modes robotics can be in
-modes:
-  states:
-    - idle
-    - pause
-    - emergency_stop
-    - exit
-    - busy
-  routines:
-    - dilution
-    - pipetting
-    - filling_vials
-    - priming_influx
-    - priming_efflux
+states:
+  - idle
+  - pause
+  - emergency_stop
+  - exit
+  - busy
+routines:
+  - dilution
+  - pipetting
+  - filling_vials
+  - priming_influx
+  - priming_efflux
 
 # ipp settings
 ipp_mapping:
@@ -55,38 +55,26 @@ pipette_head_pumps:
     ports:
       1: media
       2: sterilize
-    connected: False
+    connect: False
   1:
     hardware: XCaliburD
     ports:
       1: media
       2: sterilize
-    connected: False
+    connect: False
   2:
     hardware: XCaliburD
     ports:
       1: media
       2: sterilize
-    connected: False
+    connect: False
 
   3:
     hardware: XCaliburD
     ports:
       1: media
       2: sterilize
-    connected: False
-# xarm settings
-# 750
-# 1000
-xarm_params:
-  roll: 180
-  pitch: 0
-  yaw: 0
-  speed: 500
-  mvacc: 500
-  safety_params:
-    max_speed: 1000
-    max_mvacc: 1000
+    connect: False
 
 plane_calibration:
   0:
@@ -141,3 +129,10 @@ plane_calibration:
       vial17_x: null
       vial17_y: null
       z: null
+
+# overflow/volume settings
+overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
+overflow_voltage_threshold: 0.33 # +/- value used in reference to overflow_voltage_step to account for noisy voltages
+overflow_trigger_map:
+  left: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3]
+  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4]

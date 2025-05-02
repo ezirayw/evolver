@@ -132,6 +132,7 @@ parameters:
 broadcast_timing: 10
 num_sleeves: 16
 port: 8081
+ip: "192.168.1.15"
 
 # RPi file locations and names
 calibrations_directory: calibrations
