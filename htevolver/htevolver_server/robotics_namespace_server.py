@@ -72,6 +72,8 @@ def routine_decorator(routine_type: RoboticsRoutines):
         async def wrapper(self, *args, **kwargs):
             if self.status.state == RoboticsState.READY:
                 self.load_conf()
+                self.pipette_head.update(self.robotics_conf)
+                self.arm.update(self.robotics_conf)
                 start_time = time.time()
                 try:
                     self.status.routine = routine_type
@@ -131,12 +133,19 @@ def routine_decorator(routine_type: RoboticsRoutines):
 
 
 @dataclass
-class PumpConfig:
+class Pump:
     position_id: int
     hardware: XCaliburD | None
     ports: dict[int, FluidTypes] = field(default_factory=lambda: {1: FluidTypes.EMPTY, 2: FluidTypes.EMPTY})
     empty: bool = field(default=True)
     active_port: int = field(default=1)
+
+    def connect(self): ...
+    def disconnect(self):
+        if self.hardware:
+            del self.hardware.com_link
+
+    def prime(self): ...
 
     def check_empty(self):
         """Checks if all ports for a pump have EMPTY fluid type.
@@ -177,15 +186,15 @@ class PumpConfig:
 
 @dataclass
 class PipetteHead:
-    pumps: list[PumpConfig]
+    pumps: list[Pump]
     pump_num: int = field(default=0)
     universal_fluids: dict[FluidTypes, bool] = field(default_factory=lambda: {FluidTypes.EMPTY: True})
     num_windows: int = field(default=0)
     active_window: list[int | None] = field(default_factory=lambda: [])
-    active_pumps: list[PumpConfig] = field(default_factory=lambda: [])
+    active_pumps: list[Pump] = field(default_factory=lambda: [])
     primed: bool = field(default=False)
 
-    def update(self, robotics_conf: dict = {}):
+    def update(self, robotics_conf: dict):
         """Update the PipetteHead attributes based on the input configuration."""
 
         serial_port = robotics_conf["pump_serial_port"]
@@ -201,7 +210,7 @@ class PipetteHead:
                     )
 
             if self.pumps[position_index].ports != port_config:
-                self.pumps[position_index] = PumpConfig(
+                self.pumps[position_index] = Pump(
                     position_id=position_index,
                     hardware=XCaliburD(
                         com_link=TecanAPISerial(position_index, ser_port=serial_port, ser_baud=9600),
@@ -293,7 +302,7 @@ class xArmPlane:
         Returns:
             xArmCoordinate: The transformed coordinates in the xArm system.
         """
-        np_coordinates = np.array([[VialCoordinate.x], [VialCoordinate.y], [1]])
+        np_coordinates = np.array([[evolver_coordinates.x], [evolver_coordinates.y], [1]])
         transformed = np.dot(self.transform_matrix, np_coordinates)
         return xArmCoordinate(x=transformed[0][0], y=transformed[1][0], z=self.z)
 
@@ -311,26 +320,20 @@ class SmartStationRobotics:
 
     def update(self, robotics_conf: dict):
         """Update the SmartStation xArmPlane calibration points based on the input configuration."""
-        for calibration_point in robotics_conf["plane_calibration"][self.id]["plane_out"]:
-            if (
-                getattr(self.xArmPlane_out, calibration_point)
-                != robotics_conf["plane_calibration"][self.id]["plane_out"][calibration_point]
-            ):
+        for calibration_point, positon in robotics_conf["plane_calibration"][self.id]["plane_out"].items():
+            if hasattr(self, calibration_point) and getattr(self.xArmPlane_out, calibration_point) != positon:
                 setattr(
                     self.xArmPlane_out,
                     calibration_point,
-                    robotics_conf["plane_calibration"][self.id]["plane_out"][calibration_point],
+                    positon,
                 )
 
-        for calibration_point in robotics_conf["plane_calibration"][self.id]["plane_in"]:
-            if (
-                getattr(self.xArmPlane_in, calibration_point)
-                != robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point]
-            ):
+        for calibration_point, positon in robotics_conf["plane_calibration"][self.id]["plane_in"].items():
+            if hasattr(self, calibration_point) and getattr(self.xArmPlane_in, calibration_point) != positon:
                 setattr(
-                    self.xArmPlane_out,
+                    self.xArmPlane_in,
                     calibration_point,
-                    robotics_conf["plane_calibration"][self.id]["plane_in"][calibration_point],
+                    positon,
                 )
 
 
@@ -361,7 +364,6 @@ class xArm:
     arm_api: XArmAPI
     status: xArmStatus
     ip: str
-    connect: bool
     roll: int
     pitch: int
     yaw: int
@@ -369,6 +371,114 @@ class xArm:
     mvacc: int
     max_speed: int = field(default=1000)
     max_mvacc: int = field(default=1000)
+
+    @classmethod
+    def from_dict(cls, config: dict):
+        return cls(
+            arm_api=XArmAPI(config["xArm"]["ip"], enable_report=True, do_not_open=config["xArm"]["connect"]),
+            status=xArmStatus(),
+            ip=config["xArm"]["ip"],
+            roll=config["xArm"]["ip"],
+            pitch=config["xArm"]["ip"],
+            yaw=config["xArm"]["ip"],
+            speed=config["xArm"]["ip"],
+            mvacc=config["xArm"]["ip"],
+        )
+
+    def setup(self):
+        """Setup the xArm with standard parameters.
+
+        Clears errors, enables motion, sets collision sensitivity and
+        ensures the end effector is in a safe orientation.
+        """
+        self.arm_api.clean_warn()
+        self.arm_api.clean_error()
+        self.arm_api.motion_enable(enable=True)
+        self.arm_api.set_state(state=0)
+        self.arm_api.set_mode(0)
+        self.arm_api.set_collision_sensitivity(2)
+        self.arm_api.set_self_collision_detection(True)
+        # handle potential C21 kinematic errors (align end effector to be parallel to ground)
+        code, angles = self.arm_api.get_servo_angle()
+        if code == 0:
+            angles[3] = -(angles[1] + angles[2])
+            self.arm_api.set_servo_angle(angle=angles, wait=True)
+
+    def connect(self):
+        self.arm_api.connect()
+
+    def disconnect(self):
+        self.arm_api.disconnect()
+
+    def reset(self):
+        if not self.status.connected:
+            self.arm_api.connect()
+        self.arm_api.clean_warn()
+        self.arm_api.clean_error()
+        self.arm_api.motion_enable(True)
+        self.arm_api.set_state(0)
+        code, angles = self.arm_api.get_servo_angle()
+        if code == 0:
+            angles[3] = -(angles[1] + angles[2])
+            self.arm_api.set_servo_angle(angle=angles, wait=True)
+
+    def update(self, robotics_conf: dict):
+        for config_parameter, value in robotics_conf["xArm"].items():
+            if hasattr(self, config_parameter) and getattr(self, config_parameter) != value:
+                setattr(self, config_parameter, value)
+                logger.debug(f"Updated xArm parameter: {config_parameter}={value}")
+
+    def set_state(self, state: int):
+        self.arm_api.set_state(state)
+
+    def get_state(self):
+        result = self.arm_api.get_state()
+        if result[0] == 0:
+            return result[1]
+
+    async def move(self, coordinate: xArmCoordinate):
+        """Moves the xArm linearly to the specified coordinate.
+
+        Executes an immediate linear movement from the current position
+        to the given target position.
+
+        Args:
+            coordinate (xArmCoordinate): Target coordinates for the movement.
+                Example: xArmCoordinate(x=150, y=100, z=50)
+
+        Raises:
+            xArmError: If the movement fails or the arm is in an error state.
+        """
+
+        if self.speed > self.max_speed:
+            raise xArmError(f"Configured xArm speed parameter: {self.speed} higher than max allowed speed: {self.max_speed}")
+        if self.mvacc > self.max_mvacc:
+            raise xArmError(f"Configured xArm mvacc parameter: {self.mvacc} higher than max allowed mvacc: {self.max_mvacc}")
+
+        result = self.arm_api.set_position(
+            x=coordinate.x,
+            y=coordinate.y,
+            z=coordinate.z,
+            roll=self.roll,
+            pitch=self.pitch,
+            yaw=self.yaw,
+            speed=self.speed,
+            mvacc=self.mvacc,
+            wait=True,
+        )
+        if result < 0:
+            raise xArmError(f"xArm error detected during move_xarm(): {result}")
+
+    def register_callback(self, error_warn_callback, state_changed_callback, connect_changed_callback):
+        """Registers callback functions for the xArm API.
+
+        Sets up the error, warning, state change and connection change callbacks
+        for real-time monitoring of the xArm's status.
+        """
+
+        self.arm_api.register_error_warn_changed_callback(callback=error_warn_callback)
+        self.arm_api.register_state_changed_callback(callback=state_changed_callback)
+        self.arm_api.register_connect_changed_callback(callback=connect_changed_callback)
 
 
 class RoboticsServerNamespace(socketio.AsyncNamespace):
@@ -381,16 +491,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         super().__init__(namespace)
         self.robotics_conf: dict = robotics_conf
         self.robotics_conf_path: str = robotics_conf_path
-        self.status: RoboticsStatus = RoboticsStatus(
-            state=RoboticsState.IDLE,
-            routine=RoboticsRoutines.NO_ROUTINE,
-            active_station=-1,
-            active_pumps=[],
-            vial_window=[],
-            xArm=xArmStatus(),
-        )
-        self.xArm_command_queue: list[xArmCoordinate] = []
-        pumps: list[PumpConfig] = []
+        self.arm_command_queue: list[xArmCoordinate] = []
+        pumps: list[Pump] = []
         for position_index in range(4):
             port_config: dict[int, FluidTypes] = {}
             for port, fluid_type in self.robotics_conf["pipette_head_pumps"][position_index]["ports"].items():
@@ -403,7 +505,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                     )
             if self.robotics_conf["pipette_head_pumps"][position_index]["connect"]:
                 pumps.append(
-                    PumpConfig(
+                    Pump(
                         position_id=position_index,
                         hardware=XCaliburD(
                             com_link=TecanAPISerial(position_index, ser_port=self.robotics_conf["serial_port"], ser_baud=9600),
@@ -413,12 +515,13 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 )
             else:
                 pumps.append(
-                    PumpConfig(
+                    Pump(
                         position_id=position_index,
                         hardware=None,
                         ports=port_config,
                     )
                 )
+
         self.pipette_head: PipetteHead = PipetteHead(pumps)
 
         # initialize SmartStations
@@ -430,13 +533,20 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             self.stations.append(SmartStationRobotics(station_id, plane_out, plane_in))
 
         # initialize XArm instance
-        self.arm = XArmAPI(
-            self.robotics_conf["xArm"]["ip"], enable_report=True, do_not_open=self.robotics_conf["xArm"]["connect"]
+        self.arm = xArm.from_dict(self.robotics_conf)
+        self.arm.register_callback(self.error_warn_change_callback, self.state_changed_callback, self.connect_changed_callback)
+        self.arm.setup()
+
+        # initialize RoboticsStatus instance
+        self.status: RoboticsStatus = RoboticsStatus(
+            state=RoboticsState.IDLE,
+            routine=RoboticsRoutines.NO_ROUTINE,
+            active_station=-1,
+            active_pumps=[],
+            vial_window=[],
+            xArm=self.arm.status,
         )
-        self.status.xArm.connected = self.robotics_conf["xArm"]["connect"]
-        self.setup_xArm()
-        self.register_callback()
-        logger.info("robotics_evolver server initialized")
+        logger.info("Robotics namespace initialized")
 
     async def on_connect(self, sid):
         """Handles client connection to the robotics server.
@@ -462,15 +572,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Args:
             sid (str): Session ID of the client.
         """
-
-        # if self.status.mode != 'exit' and self.status.mode != 'idle' and self.status.mode != 'emergency_stop':
-        if self.status.state == RoboticsState.BUSY:
-            self.status.state = RoboticsState.PAUSE
-            self.arm.set_state(3)
-            for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    pump.hardware.terminateCmd()
-        logger.info("Robotics namespace put into PAUSE state")
+        self.pause_robotics()
 
     async def on_resume(self, sid):
         """Resumes robotics operations if previously paused.
@@ -480,14 +582,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Args:
             sid (str): Session ID of the client.
         """
-
-        if self.status.state == RoboticsState.PAUSE:
-            self.status.state = RoboticsState.BUSY
-            self.arm.set_state(0)
-            for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    pump.hardware.sendRcv("", execute=True)
-        logger.info("Robotics namespace put back into BUSY state, resuming previously paused activity.")
+        self.resume_robotics()
 
     async def on_stop(self, sid):
         """Stops all robotics operations immediately.
@@ -497,10 +592,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Args:
             sid (str): Session ID of the client.
         """
-
-        self.status.state = RoboticsState.STOP
         self.stop_robotics()
-        logger.info("Robotics namespace put into STOP state, active processes have been exited.")
 
     async def on_request_status(self, sid):
         """Responds with the current robotics status.
@@ -538,7 +630,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         await self.emit("get_types", {"states": states_dict, "routines": routines_dict, "fluids": fluids_dict}, to=sid)
         logger.info("Current RoboticsState and RoboticsRoutines sent to requesting client.")
 
-    async def on_override_status(self, sid, data: dict):
+    async def on_override_status(self, sid, override_data: dict):
         """Overrides the robotics status for manual intervention.
 
         Allows manual overriding of status.state and status.primed_syringe_pumps
@@ -550,19 +642,21 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Example: {"state": 0, "primed_syringe_pumps": True}
         """
 
-        if "state" in data:
-            try:
-                new_state = RoboticsState(data["state"])
-                self.status.state = new_state
-            except (KeyError, ValueError):
-                logger.warning(f"Invalid state value provided: {data['state']} when overriding status state")
+        for override_key, value in override_data.items():
+            if hasattr(self.status, override_key):
+                # Check the type of the existing attribute and ensure new value matches
+                attribute_value = getattr(self.status, override_key)
+                attr_type = type(attribute_value)
+                try:
+                    # Try to cast the new value to the correct type
+                    typed_value = attr_type(value)
+                    setattr(self.status, override_key, typed_value)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid type for {override_key}: expected {attr_type.__name__}, got {type(value).__name__}")
 
-        if "primed_syringe_pumps" in data:
-            self.pipette_head.primed = data["primed_syringe_pumps"]
+        logger.info(f"Robotics namespace state overriden with {override_data}.")
 
-        logger.info(f"Robotics namespace state overriden with {data}.")
-
-    async def on_reconnect_xArm(self, sid):
+    async def on_connect_xArm(self, sid):
         """Reconnects to the xArm robot.
 
         Attempts to establish a connection with the xArm hardware.
@@ -571,7 +665,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
         """
         self.arm.connect()
-        self.status.xArm.connected = True
         logger.info("Robotics namespace reconnected to xArm.")
 
     async def on_reset_xArm(self, sid):
@@ -583,10 +676,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
         """
 
-        if not self.status.xArm.connected:
-            self.arm.connect()
-        self.reset_xArm()
+        self.arm.reset()
         logger.info("Robotics namespace resetting xArm.")
+
+    async def on_connect_pumps(self, sid): ...
+    async def on_disconnect_pumps(self, sid): ...
 
     async def on_initialize_pumps(self, sid):
         """Initializes the XCaliburD/Tecan syringe pumps.
@@ -597,7 +691,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
         """
 
-        self.pipette_head.update()
         for index, pump in enumerate(self.pipette_head.pumps):
             if not self.pipette_head.pumps[index].empty:
                 try:
@@ -762,7 +855,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
 
         coordinate = VialCoordinate(x=-18, y=36)
-        self.pipette_head.update()
 
         for station_id, pump_commands in station_pump_commands.items():
             self.status.active_station = station_id
@@ -795,7 +887,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         move_1 = station.xArmPlane_out.vial_to_xarm(station.wash_location)
                         move_2 = station.xArmPlane_in.vial_to_xarm(station.wash_location)
 
-                        self.xArm_command_queue.extend([move_0, move_1, move_2])
+                        self.arm_command_queue.extend([move_0, move_1, move_2])
 
                     try:
                         await self.pipette_event([0, 0, 0, 0])
@@ -818,7 +910,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         move_1 = station.xArmPlane_out.vial_to_xarm(coordinate)
                         move_2 = station.xArmPlane_in.vial_to_xarm(coordinate)
 
-                        self.xArm_command_queue.extend([move_0, move_1, move_2])
+                        self.arm_command_queue.extend([move_0, move_1, move_2])
 
                     # get pump volume commands for current vial window
                     pump_volumes = [0] * 4
@@ -855,7 +947,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 change_row = True
             try:
                 reset_location = station.xArmPlane_out.vial_to_xarm(coordinate)
-                await self.move_xarm(reset_location)
+                await self.arm.move(reset_location)
             except xArmError as e:
                 logger.error(e)
                 raise OperationEventError(f"Error moving arm above station at the end of influx_snake_helper(): {e}")
@@ -885,7 +977,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             async with asyncio.TaskGroup() as aspiration_tasks:
                 aspiration_tasks.create_task(self.run_pumps("extract", pump_commands))
 
-                if self.xArm_command_queue:
+                if self.arm_command_queue:
                     aspiration_tasks.create_task(self.execute_xArm_commands())
         except* (xArmError, SyringeError, SyringeTimeout) as e:
             logger.error(f"error trying to execute aspiration tasks during pipette_event(): {e}")
@@ -951,17 +1043,18 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             xArmError: If a movement fails or if the queue is empty.
         """
 
-        if not self.xArm_command_queue:
+        if not self.arm_command_queue:
             logger.warning("tried running execute_xArm_commands but no xArm commands found in queue")
             raise xArmError("tried running execute_xArm_commands but no xArm commands found in queue")
 
-        for index, command in enumerate(self.xArm_command_queue):
-            try:
-                await self.move_xarm(command)
-                self.xArm_command_queue.pop(index)
-            except xArmError as e:
-                logger.error(f"tried running command {command} but following error ecnountered: {e}")
-                raise xArmError(f"error trying to run execute_xArm_commands: {e}")
+        while self.arm_command_queue:
+            for index, command in enumerate(self.arm_command_queue):
+                try:
+                    await self.arm.move(command)
+                    self.arm_command_queue.pop(index)
+                except xArmError as e:
+                    logger.error(f"tried running command {command} but following error ecnountered: {e}")
+                    raise xArmError(f"error trying to run execute_xArm_commands: {e}")
 
     async def broadcast(self):
         """Broadcasts the current robotics status to all connected clients.
@@ -989,6 +1082,48 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         logging.info(f"robotics status broadcast: {self.status}")
         await self.emit("broadcast", self.status.to_dict())
 
+    def error_warn_change_callback(self, xarm_api_data: dict):
+        """Updates error and warning codes based on xArm feedback.
+
+        Args:
+            data (dict): A dictionary containing error and warning codes.
+                Example: {"error_code": 0, "warn_code": 0}
+        """
+
+        self.status.xArm.error_code = xarm_api_data["error_code"]
+        self.status.xArm.warning_code = xarm_api_data["warn_code"]
+        logger.debug(f"xArm error/warn change callback input: {xarm_api_data}")
+        if xarm_api_data["error_code"] != 0:
+            self.emergency_stop_robotics()
+            logger.error(f"xArm error_code encountered: {xarm_api_data['error_code']}")
+        if xarm_api_data["warn_code"] != 0:
+            logger.warning(f"xArm warning_code encountered: {xarm_api_data['warn_code']}")
+
+    def state_changed_callback(self, xarm_api_data: dict):
+        """Updates xArm state based on controller feedback.
+
+        Args:
+            data (dict): Contains the xArm state information.
+                Example: {"state": 0}
+        """
+
+        self.status.xArm.state = xarm_api_data["state"]
+        logger.debug(f"xArm state change callback input: {xarm_api_data}")
+        if xarm_api_data["state"] == 4:
+            self.emergency_stop_robotics()
+            logger.error(f"xArm entered stop state: {xarm_api_data['state']}")
+
+    def connect_changed_callback(self, xarm_api_data: dict):
+        """Updates xArm connection status based on controller feedback.
+
+        Args:
+            data (dict): Contains the connection status.
+                Example: {"connected": True}
+        """
+
+        self.status.xArm.connected = xarm_api_data["connected"]
+        logger.debug(f"xArm connect change callback input: {xarm_api_data}")
+
     def load_conf(self):
         """Loads in the robotics configuration from memory.
 
@@ -1003,65 +1138,13 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             station.update(self.robotics_conf)
         self.pipette_head.update(self.robotics_conf)
 
-    def register_callback(self):
-        """Registers callback functions for the xArm.
-
-        Sets up the error, warning, state change and connection change callbacks
-        for real-time monitoring of the xArm's status.
-        """
-
-        self.arm.register_error_warn_changed_callback(callback=self.error_warn_change_callback)
-        self.arm.register_state_changed_callback(callback=self.state_changed_callback)
-        self.arm.register_connect_changed_callback(callback=self.connect_changed_callback)
-
-    def error_warn_change_callback(self, data: dict):
-        """Updates error and warning codes based on xArm feedback.
-
-        Args:
-            data (dict): A dictionary containing error and warning codes.
-                Example: {"error_code": 0, "warn_code": 0}
-        """
-
-        self.status.xArm.error_code = data["error_code"]
-        self.status.xArm.warning_code = data["warn_code"]
-        if data["error_code"] != 0:
-            self.emergency_stop_robotics()
-            logger.error(f"xArm error_code encountered: {data['error_code']}")
-        if data["warn_code"] != 0:
-            logger.warning(f"xArm warning_code encountered: {data['warn_code']}")
-
-    def state_changed_callback(self, data: dict):
-        """Updates xArm state based on controller feedback.
-
-        Args:
-            data (dict): Contains the xArm state information.
-                Example: {"state": 0}
-        """
-
-        logger.debug(data)
-        self.status.xArm.arm_state = data["state"]
-        if data["state"] == 4:
-            self.emergency_stop_robotics()
-            logger.error(f"xArm entered stop state: {data['state']}")
-
-    def connect_changed_callback(self, data: dict):
-        """Updates xArm connection status based on controller feedback.
-
-        Args:
-            data (dict): Contains the connection status.
-                Example: {"connected": True}
-        """
-
-        self.status.xArm.connected = data["connected"]
-        logger.info(f"xArm connection status changed to: {data['connected']}")
-
     def stop_robotics(self):
         """Stops all robotics and pump operations due to user intervention.
 
         Terminates all syringe pump commands and puts xArm into stop state.
         """
 
-        logger.info("stopping any current syringe pumps and xArm operations")
+        self.status.state = RoboticsState.STOP
         try:
             for pump in self.pipette_head.pumps:
                 if pump.hardware:
@@ -1070,6 +1153,30 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             self.arm.set_state(4)
         except (SyringeError, SyringeTimeout) as e:
             logger.error(f"error encountered trying to call stop_robotics(): {e}")
+        logger.info("Robotics namespace put into STOP state, active processes have been exited.")
+
+    def pause_robotics(self):
+        """Pauses robotics operations if currently busy.
+
+        Sets the robotics state to PAUSE, pauses xArm operations by setting its
+        state to 3 (pause), and terminates pending syringe pump commands.
+        """
+        if self.status.state == RoboticsState.BUSY:
+            self.status.state = RoboticsState.PAUSE
+            self.arm.set_state(3)
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    pump.hardware.terminateCmd()
+        logger.info("Robotics namespace put into PAUSE state")
+
+    def resume_robotics(self):
+        if self.status.state == RoboticsState.PAUSE:
+            self.status.state = RoboticsState.BUSY
+            self.arm.set_state(0)
+            for pump in self.pipette_head.pumps:
+                if pump.hardware:
+                    pump.hardware.sendRcv("", execute=True)
+        logger.info("Robotics namespace put back into BUSY state, resuming previously paused activity.")
 
     def emergency_stop_robotics(self):
         """Stops all robotics and pump operations in emergency situations.
@@ -1078,16 +1185,14 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         and disconnects from the hardware. Requires manual intervention to restart.
         """
 
-        logger.info("stopping any current syringe pumps and xArm operations")
         try:
             self.stop_robotics()
             for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    del pump.hardware
-            self.arm.emergency_stop()
+                pump.disconnect()
             self.arm.disconnect()
         except (SyringeError, SyringeTimeout) as e:
             logger.error(f"error encountered trying to call stop_robotics(): {e}")
+        logger.info("Robotics namespace put into EMERGENCY_STOP state")
 
     async def check_for_interrupt(self):
         """Checks for pause or stop signals during routine execution.
@@ -1101,74 +1206,3 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 raise ExitRobotics
             else:
                 await asyncio.sleep(0.1)
-
-    def setup_xArm(self):
-        """Initializes the xArm with standard parameters.
-
-        Clears errors, enables motion, sets collision sensitivity and
-        ensures the end effector is in a safe orientation.
-        """
-        self.arm.clean_warn()
-        self.arm.clean_error()
-        self.arm.motion_enable(enable=True)
-        self.arm.set_state(state=0)
-        self.arm.set_mode(0)
-        self.arm.set_collision_sensitivity(2)
-        self.arm.set_self_collision_detection(True)
-        # handle potential C21 kinematic errors (align end effector to be parallel to ground)
-        code, angles = self.arm.get_servo_angle()
-        if code == 0:
-            angles[3] = -(angles[1] + angles[2])
-            self.arm.set_servo_angle(angle=angles, wait=True)
-
-    def reset_xArm(self):
-        """Resets the xArm to clear errors and reset position.
-
-        Clears warnings/errors and aligns the end effector to
-        restore normal operation after an error condition.
-        """
-        self.arm.clean_warn()
-        self.arm.clean_error()
-        self.arm.motion_enable(True)
-        self.arm.set_state(0)
-        code, angles = self.arm.get_servo_angle()
-        if code == 0:
-            angles[3] = -(angles[1] + angles[2])
-            self.arm.set_servo_angle(angle=angles, wait=True)
-
-    async def move_xarm(self, coordinate: xArmCoordinate):
-        """Moves the xArm linearly to the specified coordinate.
-
-        Executes an immediate linear movement from the current position
-        to the given target position.
-
-        Args:
-            coordinate (xArmCoordinate): Target coordinates for the movement.
-                Example: xArmCoordinate(x=150, y=100, z=50)
-
-        Raises:
-            xArmError: If the movement fails or the arm is in an error state.
-        """
-
-        self.load_conf()
-        xarm_config = self.robotics_conf["xArm"]["params"]
-        if xarm_config["params"]["speed"] > 1000:
-            raise xArmError(f"Configured xArm speed parameter too high: {xarm_config['params']['speed']}, bring it under 1000")
-        if xarm_config["params"]["mvacc"] > 1000:
-            raise xArmError(f"Configured xArm mvacc parameter too high: {xarm_config['params']['mvacc']}, bring it under 1000")
-        if self.status.xArm.arm_state == 4:
-            raise xArmError("xArm in stop state, requires reset")
-
-        result = self.arm.set_position(
-            x=coordinate.x,
-            y=coordinate.y,
-            z=coordinate.z,
-            roll=xarm_config["params"]["roll"],
-            pitch=xarm_config["params"]["pitch"],
-            yaw=xarm_config["params"]["yaw"],
-            speed=xarm_config["params"]["speed"],
-            mvacc=xarm_config["params"]["mvacc"],
-            wait=True,
-        )
-        if result < 0:
-            raise xArmError(f"xArm error detected during move_xarm(): {result}")

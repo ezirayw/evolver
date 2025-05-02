@@ -45,8 +45,6 @@ async def broadcast_loop(app: Application):
     last_time = 0.0
     while True:
         current_time = time.time()
-        timing = app["broadcast_timing"]
-        logger.debug(timing)
 
         if (
             (last_time == 0.0 or (current_time - last_time >= app["broadcast_timing"]))
@@ -86,11 +84,13 @@ async def broadcast_loop(app: Application):
 async def background_tasks(app):
     """Start background tasks after app startup"""
     app["broadcast_task"] = asyncio.create_task(broadcast_loop(app))
+    logger.debug("starting")
 
     yield
-
+    logger.debug("closing")
     app["broadcast_task"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
+        logger.debug("handling close")
         await app["broadcast_task"]
 
 
@@ -128,7 +128,6 @@ def init_app():
 
 
 def main():
-    """Main entry point for the application"""
     app = init_app()
     logger.info(f"Starting HT-eVOLVER server on port {app['port']}")
     web.run_app(app, port=app["port"])

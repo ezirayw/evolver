@@ -94,8 +94,8 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.emit("request_types")
         logger.info("Requesting robotics namespace data types from HTeVOLVER server.")
 
-    def reconnect_xArm(self):
-        self.emit("reconnect_xArm")
+    def connect_xArm(self):
+        self.emit("connect_xArm")
         logger.info("Reconnecting xArm to HTeVOLVER  server")
 
     def override_status(self, override_commands: dict):

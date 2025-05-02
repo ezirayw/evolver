@@ -465,7 +465,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             phase=self.status.phase,
             data=data,
             config=self.evolver_conf["parameters"][f"phase_{phase}"],
-            ip=self.evolver_conf["server_ip"],
+            ip=self.evolver_conf["ip"],
             timestamp=time.time(),
         )
         logging.info(f"eVOLVER Broadcast: {broadcast_data}")

@@ -83,7 +83,7 @@ class EvolverCommand:
 class xArmStatus:
     warning_code: int = 0
     error_code: int = 0
-    arm_state: int = 0
+    state: int = 0
     connected: bool = False
 
 
@@ -106,13 +106,13 @@ class RoboticsStatus:
             "xArm": {
                 "warning_code": self.xArm.warning_code,
                 "error_code": self.xArm.error_code,
-                "arm_state": self.xArm.arm_state,
+                "arm_state": self.xArm.state,
                 "connected": self.xArm.connected,
             },
         }
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: dict):
         return cls(
             state=RoboticsState(data["state"]),
             routine=RoboticsRoutines(data["routine"]),
@@ -122,7 +122,7 @@ class RoboticsStatus:
             xArm=xArmStatus(
                 warning_code=data["xArm"]["warning_code"],
                 error_code=data["xArm"]["error_code"],
-                arm_state=data["xArm"]["arm_state"],
+                state=data["xArm"]["arm_state"],
                 connected=data["xArm"]["connected"],
             ),
         )
