@@ -26,7 +26,6 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         evolver_conf: dict,
         evolver_conf_path: str,
         namespace: str = "/evolver",
-        calibrations_dir: str = os.path.join(os.path.expanduser("~"), "calibrations"),
     ):
         super().__init__(namespace)
         self.evolver_conf: dict = evolver_conf
@@ -38,7 +37,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             running_broadcast=False,
         )
 
-        self.calibrations_dir: str = calibrations_dir
+        self.calibrations_dir: str = evolver_conf["calibrations_dir"]
         self.serial_connection: serial.Serial = serial.Serial(
             port=self.evolver_conf["serial_port"],
             baudrate=self.evolver_conf["serial_baudrate"],

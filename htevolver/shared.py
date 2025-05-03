@@ -39,8 +39,6 @@ class CommandTags(Enum):
 
 
 #### BROADCAST DATA STORAGE CLASSES ####
-
-
 @dataclass
 class BroadcastData:
     phase: int = field(default=0)

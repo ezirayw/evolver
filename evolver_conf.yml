@@ -133,9 +133,10 @@ broadcast_timing: 10
 num_sleeves: 16
 port: 8081
 ip: "192.168.1.15"
+log_level: "DEBUG"
 
 # RPi file locations and names
-calibrations_directory: calibrations
+calibrations_directory: "/home/pi/calibrations"
 valid_calibrations: ["temp", "od", "ipp"]
 od_calibration_directory: od
 temp_calibration_directory: temp

@@ -94,7 +94,7 @@ async def background_tasks(app):
         await app["broadcast_task"]
 
 
-def init_app():
+def init():
     """Initialize the web application with all required components"""
     # Load configs
     evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", EVOLVER_CONF_FILENAME))
@@ -102,12 +102,13 @@ def init_app():
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:
-        logger.debug(evolver_conf_path)
         evolver_conf = yaml.safe_load(ymlfile)
 
     with open(robotics_conf_path, "r") as ymlfile:
-        logger.debug(robotics_conf_path)
         robotics_conf = yaml.safe_load(ymlfile)
+
+    log_level = evolver_conf.get("log_level", "INFO").upper()
+    logger.setLevel(getattr(logging, log_level))
 
     app = web.Application()
     app["port"] = evolver_conf["port"]
@@ -128,7 +129,7 @@ def init_app():
 
 
 def main():
-    app = init_app()
+    app = init()
     logger.info(f"Starting HT-eVOLVER server on port {app['port']}")
     web.run_app(app, port=app["port"])
 
