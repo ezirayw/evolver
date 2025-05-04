@@ -20,7 +20,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
     datefmt="%Y-%m-%d %H:%M:%S",
     filename="/home/pi/htevolver.log",
-    level=logging.DEBUG,
+    level=logging.INFO,
 )
 logging.getLogger("engineio.client").setLevel(logging.ERROR)
 logging.getLogger("socketio.client").setLevel(logging.ERROR)
@@ -51,7 +51,7 @@ async def broadcast_loop(app: Application):
             and not app["evolver_namespace"].status.running_immediate
             and not app["evolver_namespace"].status.running_broadcast
         ):
-            logger.info("starting broadcast loop")
+            logger.info("Starting Broadcast Loop")
             start_time = time.time()
 
             await app["robotics_namespace"].broadcast()
@@ -75,7 +75,7 @@ async def broadcast_loop(app: Application):
             end_time = time.time()
             last_time = start_time
             elapsed_time = end_time - start_time
-            logger.info(f"total broadcast processing time: {elapsed_time}")
+            logger.info(f"Total Broadcast Processing Time: {elapsed_time}")
 
         # Non-blocking sleep to let the event loop handle other tasks
         await asyncio.sleep(0.1)
@@ -87,7 +87,7 @@ async def background_tasks(app):
     logger.debug("starting")
 
     yield
-    logger.debug("closing")
+    logger.debug("closing background broadcast loop")
     app["broadcast_task"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
         logger.debug("handling close")

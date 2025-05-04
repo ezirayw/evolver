@@ -45,32 +45,34 @@ wash_settings:
   submersed_time: 10 # seconds
   dry_time: 10 # seconds
 
-pipette_head_pumps:
-  0:
-    hardware: XCaliburD
-    ports:
-      1: media
-      2: sterilize
-    connect: False
-  1:
-    hardware: XCaliburD
-    ports:
-      1: media
-      2: sterilize
-    connect: False
-  2:
-    hardware: XCaliburD
-    ports:
-      1: media
-      2: sterilize
-    connect: False
+pipette_head:
+  serial_port: ""
+  pumps:
+    0:
+      hardware: XCaliburD
+      ports:
+        1: media
+        2: sterilize
+      connect: False
+    1:
+      hardware: XCaliburD
+      ports:
+        1: media
+        2: sterilize
+      connect: False
+    2:
+      hardware: XCaliburD
+      ports:
+        1: media
+        2: sterilize
+      connect: False
 
-  3:
-    hardware: XCaliburD
-    ports:
-      1: media
-      2: sterilize
-    connect: False
+    3:
+      hardware: XCaliburD
+      ports:
+        1: media
+        2: sterilize
+      connect: False
 
 plane_calibration:
   0:

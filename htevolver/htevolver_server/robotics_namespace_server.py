@@ -71,8 +71,7 @@ def routine_decorator(routine_type: RoboticsRoutines):
         async def wrapper(self, *args, **kwargs):
             if self.status.state == RoboticsState.READY:
                 self.load_conf()
-                self.pipette_head.update(self.robotics_conf)
-                self.arm.update(self.robotics_conf)
+                self.update_robotics()
                 start_time = time.time()
                 try:
                     self.status.routine = routine_type
@@ -134,15 +133,36 @@ def routine_decorator(routine_type: RoboticsRoutines):
 @dataclass
 class Pump:
     position_id: int
-    hardware: XCaliburD | None
+    hardware: XCaliburD
     ports: dict[int, FluidTypes] = field(default_factory=lambda: {1: FluidTypes.EMPTY, 2: FluidTypes.EMPTY})
     empty: bool = field(default=True)
     active_port: int = field(default=1)
+    connected: bool = field(default=False)
 
-    def connect(self): ...
-    def disconnect(self):
-        if self.hardware:
+    def connect(self):
+        self.connected = True
+        # check if hardware com_link exists, if not, re-establish
+
+    def disconnect(self, delete: bool = False):
+        if delete:
             del self.hardware.com_link
+        self.connected = False
+
+    def initialize(self):
+        if self.connected:
+            self.hardware.init()
+        else:
+            raise RoboticsError(f"PipetteHead Pump_{self.position_id} cannot be initialized, not connected")
+
+    def pause(self):
+        self.hardware.terminateCmd()
+
+    def stop(self):
+        self.hardware.terminateCmd()
+        self.hardware.resetChain()
+
+    def resume(self):
+        self.hardware.sendRcv("", execute=True)
 
     def prime(self): ...
 
@@ -177,7 +197,9 @@ class Pump:
                 available_ports.append(port_index)
 
         if not available_ports:
-            raise RoboticsError(f"Pump_{self.position_id} does not have the following fluid_type: {desired_fluid_type}")
+            raise RoboticsError(
+                f"PipetteHead Pump_{self.position_id} does not have the following fluid_type: {desired_fluid_type}"
+            )
 
         # Use the lowest port number if multiple ports have the same fluid type
         self.active_port = min(available_ports)
@@ -193,13 +215,12 @@ class PipetteHead:
     active_pumps: list[Pump] = field(default_factory=lambda: [])
     primed: bool = field(default=False)
 
-    def update(self, robotics_conf: dict):
-        """Update the PipetteHead attributes based on the input configuration."""
-
-        serial_port = robotics_conf["pump_serial_port"]
+    @classmethod
+    def from_config(cls, config: dict):
+        pumps: list[Pump] = []
         for position_index in range(4):
             port_config: dict[int, FluidTypes] = {}
-            for port, fluid_type in robotics_conf["pipette_head_pumps"][position_index].items():
+            for port, fluid_type in config["pipette_head"]["pumps"][position_index]["ports"].items():
                 if fluid_type in FluidTypes.__members__:
                     port_config[port] = FluidTypes[fluid_type]
                 else:
@@ -207,16 +228,20 @@ class PipetteHead:
                     logger.warning(
                         f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
                     )
-
-            if self.pumps[position_index].ports != port_config:
-                self.pumps[position_index] = Pump(
+            pumps.append(
+                Pump(
                     position_id=position_index,
                     hardware=XCaliburD(
-                        com_link=TecanAPISerial(position_index, ser_port=serial_port, ser_baud=9600),
+                        com_link=TecanAPISerial(position_index, ser_port=config["pipette_head"]["serial_port"], ser_baud=9600),
                     ),
                     ports=port_config,
+                    connected=config["pipette_head"]["pumps"][position_index]["connect"],
                 )
+            )
 
+        return cls(pumps=pumps)
+
+    def setup(self):
         for pump in self.pumps:
             pump.check_empty()
             if not pump.empty:
@@ -234,6 +259,15 @@ class PipetteHead:
         self.active_pumps = []
         self.active_window = []
         self.primed = False
+
+    def update(self, robotics_config: dict):
+        """Update the PipetteHead based on the input configuration."""
+
+        for position_index in range(4):
+            for port, fluid_type in robotics_config["pipette_head"][position_index].items():
+                if fluid_type in FluidTypes.__members__ and self.pumps[position_index].ports[port] != fluid_type:
+                    self.pumps[position_index].ports[port] = FluidTypes[fluid_type]
+            self.pumps[position_index].connected = robotics_config["pipette_head"]["pumps"][position_index]["connect"]
 
 
 @dataclass
@@ -272,6 +306,9 @@ class xArmPlane:
     vial17_y: float
     z: float
     transform_matrix: EuclideanTransform = field(init=False)
+
+    def __post_init__(self):
+        self.rigid_transform()
 
     def rigid_transform(self):
         """Calculates the rigid transformation matrix between coordinate systems.
@@ -317,23 +354,25 @@ class SmartStationRobotics:
         default_factory=lambda: [[0, 1, 2, 3, 4, 5], [11, 10, 9, 8, 7, 6], [12, 13, 14, 15, 16, 17]]
     )
 
-    def update(self, robotics_conf: dict):
+    def update(self, robotics_config: dict):
         """Update the SmartStation xArmPlane calibration points based on the input configuration."""
-        for calibration_point, positon in robotics_conf["plane_calibration"][self.id]["plane_out"].items():
-            if hasattr(self, calibration_point) and getattr(self.xArmPlane_out, calibration_point) != positon:
+        for calibration_point, positon in robotics_config["plane_calibration"][self.id]["plane_out"].items():
+            if hasattr(self.xArmPlane_out, calibration_point) and getattr(self.xArmPlane_out, calibration_point) != positon:
                 setattr(
                     self.xArmPlane_out,
                     calibration_point,
                     positon,
                 )
 
-        for calibration_point, positon in robotics_conf["plane_calibration"][self.id]["plane_in"].items():
-            if hasattr(self, calibration_point) and getattr(self.xArmPlane_in, calibration_point) != positon:
+        for calibration_point, positon in robotics_config["plane_calibration"][self.id]["plane_in"].items():
+            if hasattr(self.xArmPlane_in, calibration_point) and getattr(self.xArmPlane_in, calibration_point) != positon:
                 setattr(
                     self.xArmPlane_in,
                     calibration_point,
                     positon,
                 )
+        self.xArmPlane_in.rigid_transform()
+        self.xArmPlane_out.rigid_transform()
 
 
 @dataclass
@@ -372,7 +411,7 @@ class xArm:
     max_mvacc: int = field(default=1000)
 
     @classmethod
-    def from_dict(cls, config: dict):
+    def from_config(cls, config: dict):
         return cls(
             arm_api=XArmAPI(config["xArm"]["ip"], enable_report=True, do_not_open=config["xArm"]["connect"]),
             status=xArmStatus(),
@@ -421,8 +460,8 @@ class xArm:
             angles[3] = -(angles[1] + angles[2])
             self.arm_api.set_servo_angle(angle=angles, wait=True)
 
-    def update(self, robotics_conf: dict):
-        for config_parameter, value in robotics_conf["xArm"].items():
+    def update(self, robotics_config: dict):
+        for config_parameter, value in robotics_config["xArm"].items():
             if hasattr(self, config_parameter) and getattr(self, config_parameter) != value:
                 setattr(self, config_parameter, value)
                 logger.debug(f"Updated xArm parameter: {config_parameter}={value}")
@@ -483,56 +522,27 @@ class xArm:
 class RoboticsServerNamespace(socketio.AsyncNamespace):
     def __init__(
         self,
-        robotics_conf: dict,
-        robotics_conf_path: str,
+        robotics_config: dict,
+        robotics_config_path: str,
         namespace: str = "/robotics",
     ):
         super().__init__(namespace)
-        self.robotics_conf: dict = robotics_conf
-        self.robotics_conf_path: str = robotics_conf_path
+        self.robotics_config: dict = robotics_config
+        self.robotics_config_path: str = robotics_config_path
         self.arm_command_queue: list[xArmCoordinate] = []
-        pumps: list[Pump] = []
-        for position_index in range(4):
-            port_config: dict[int, FluidTypes] = {}
-            for port, fluid_type in self.robotics_conf["pipette_head_pumps"][position_index]["ports"].items():
-                if fluid_type in FluidTypes.__members__:
-                    port_config[port] = FluidTypes[fluid_type]
-                else:
-                    port_config[port] = FluidTypes.EMPTY
-                    logger.warning(
-                        f"Invalid fluid type found in config: {fluid_type}, defaulting to EMPTY for position_{position_index}"
-                    )
-            if self.robotics_conf["pipette_head_pumps"][position_index]["connect"]:
-                pumps.append(
-                    Pump(
-                        position_id=position_index,
-                        hardware=XCaliburD(
-                            com_link=TecanAPISerial(position_index, ser_port=self.robotics_conf["serial_port"], ser_baud=9600),
-                        ),
-                        ports=port_config,
-                    )
-                )
-            else:
-                pumps.append(
-                    Pump(
-                        position_id=position_index,
-                        hardware=None,
-                        ports=port_config,
-                    )
-                )
-
-        self.pipette_head: PipetteHead = PipetteHead(pumps)
+        self.pipette_head: PipetteHead = PipetteHead.from_config(self.robotics_config)
+        self.pipette_head.setup()
 
         # initialize SmartStations
         self.stations: list[SmartStationRobotics] = []
-        plane_calibration = self.robotics_conf["plane_calibration"]
+        plane_calibration = self.robotics_config["plane_calibration"]
         for station_id in range(4):
             plane_out = xArmPlane(**plane_calibration[station_id]["plane_out"])
             plane_in = xArmPlane(**plane_calibration[station_id]["plane_in"])
             self.stations.append(SmartStationRobotics(station_id, plane_out, plane_in))
 
         # initialize XArm instance
-        self.arm = xArm.from_dict(self.robotics_conf)
+        self.arm = xArm.from_config(self.robotics_config)
         self.arm.register_callback(self.error_warn_change_callback, self.state_changed_callback, self.connect_changed_callback)
         self.arm.setup()
 
@@ -612,7 +622,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Args:
             sid (str): Session ID of the requesting client.
         """
-        await self.emit("get_conf", self.robotics_conf, to=sid)
+        await self.emit("get_conf", self.robotics_config, to=sid)
         logger.info("Current robotics configuration sent to requesting client.")
 
     async def on_request_types(self, sid):
@@ -678,8 +688,15 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         self.arm.reset()
         logger.info("Robotics namespace resetting xArm.")
 
-    async def on_connect_pumps(self, sid): ...
-    async def on_disconnect_pumps(self, sid): ...
+    async def on_connect_pumps(self, sid, pump_list: list[int]):
+        """Connects to PipetteHead syringe pumps"""
+
+        for position_index in pump_list:
+            self.pipette_head.pumps[position_index].connect()
+
+    async def on_disconnect_pumps(self, sid, pump_list: list[int]):
+        for position_index in pump_list:
+            self.pipette_head.pumps[position_index].disconnect()
 
     async def on_initialize_pumps(self, sid):
         """Initializes the XCaliburD/Tecan syringe pumps.
@@ -693,8 +710,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         for index, pump in enumerate(self.pipette_head.pumps):
             if not self.pipette_head.pumps[index].empty:
                 try:
-                    if pump.hardware:
-                        pump.hardware.init()
+                    pump.initialize()
                 except (SyringeError, SyringeTimeout) as e:
                     logger.warning(
                         f"Error trying to initialize {self.pipette_head.pumps[index].position_id} in position {index}: {e}"
@@ -1011,24 +1027,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             SyringeError: If a syringe operation fails.
             SyringeTimeout: If a syringe operation times out.
         """
-        for index, command in enumerate(pump_commands):
-            if not self.pipette_head.pumps[index].hardware:
+        for position_index, command in enumerate(pump_commands):
+            if not self.pipette_head.pumps[position_index].connected:
                 continue
             try:
-                method = getattr(self.pipette_head.pumps[index], method_name)
+                method = getattr(self.pipette_head.pumps[position_index], method_name)
 
                 # wrapper function that adds the command to the pump's command chain and calls executeChain() & waitReady()
                 def execute_pump_method(pump_method, method_args):
                     pump_method(*method_args)
 
-                    delay = self.pipette_head.pumps[index].hardware.executeChain()
-                    self.pipette_head.pumps[index].hardware.waitReady(delay)
+                    delay = self.pipette_head.pumps[position_index].hardware.executeChain()
+                    self.pipette_head.pumps[position_index].hardware.waitReady(delay)
 
                 # run the blocking method in the default executor (thread pool)
                 await asyncio.get_event_loop().run_in_executor(None, execute_pump_method, method, pump_commands)
 
             except (SyringeError, SyringeTimeout) as e:
-                logger.error(f"Error with pump_position: {index} during {method_name}: {e}")
+                logger.error(f"Error with PipetteHead Pump_: {position_index} during {method_name}: {e}")
                 raise e
 
     @operation_decorator
@@ -1063,22 +1079,22 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
         # check for potential overflow based on sensitivity threshold
         # overflow_trigger_map = {'left': [], 'right': []}
-        # overflow_trigger_map['left'] =  [x * self.robotics_conf['overflow_voltage_step'] for x in self.robotics_conf['overflow_trigger_map']['left']]
-        # overflow_trigger_map['right'] =  [x * self.robotics_conf['overflow_voltage_step'] for x in self.robotics_conf['overflow_trigger_map']['right']]
+        # overflow_trigger_map['left'] =  [x * self.robotics_config['overflow_voltage_step'] for x in self.robotics_config['overflow_trigger_map']['left']]
+        # overflow_trigger_map['right'] =  [x * self.robotics_config['overflow_voltage_step'] for x in self.robotics_config['overflow_trigger_map']['right']]
         # for quad_index in range(4):
-        #    if (self.htevolver_client.overflow_data['left'][quad_index] > self.robotics_conf['overflow_voltage_threshold']) or (self.htevolver_client.overflow_data['right'][quad_index] > self.robotics_conf['overflow_voltage_threshold']):
+        #    if (self.htevolver_client.overflow_data['left'][quad_index] > self.robotics_config['overflow_voltage_threshold']) or (self.htevolver_client.overflow_data['right'][quad_index] > self.robotics_config['overflow_voltage_threshold']):
         #        self.status.overflow_status['quads'][quad_index] = True
         #        self.stop_robotics()
 
         # identify the vial(s) that overflowed
         #        for index in range(18):
-        #            if self.htevolver_client.overflow_data['right'][quad_index] >= overflow_trigger_map['right'][index] - self.robotics_conf['overflow_voltage_threshold'] or self.htevolver_client.overflow_data['right'][quad_index] <= overflow_trigger_map['right'][index] + self.robotics_conf['overflow_voltage_threshold']:
+        #            if self.htevolver_client.overflow_data['right'][quad_index] >= overflow_trigger_map['right'][index] - self.robotics_config['overflow_voltage_threshold'] or self.htevolver_client.overflow_data['right'][quad_index] <= overflow_trigger_map['right'][index] + self.robotics_config['overflow_voltage_threshold']:
         #                for vial_index in range(index, index + 5):
-        #                    if self.htevolver_client.overflow_data['left'][quad_index] >= overflow_trigger_map['left'][index] - self.robotics_conf['overflow_voltage_threshold'] or self.htevolver_client.overflow_data['left'][quad_index] <= overflow_trigger_map['left'][index] + self.robotics_conf['overflow_voltage_threshold']:
+        #                    if self.htevolver_client.overflow_data['left'][quad_index] >= overflow_trigger_map['left'][index] - self.robotics_config['overflow_voltage_threshold'] or self.htevolver_client.overflow_data['left'][quad_index] <= overflow_trigger_map['left'][index] + self.robotics_config['overflow_voltage_threshold']:
         #                        self.status.overflow_status['vial'] = vial_index
 
         # emit robotics status to all connected clients
-        logging.info(f"robotics status broadcast: {self.status}")
+        logging.info(f"Robotics broadcast: {self.status}")
         await self.emit("broadcast", self.status.to_dict())
 
     def error_warn_change_callback(self, xarm_api_data: dict):
@@ -1126,16 +1142,18 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
     def load_conf(self):
         """Loads in the robotics configuration from memory.
 
-        Loads the latest settings from the robotics_conf file and updates the PipetteHead and SmartStations
+        Loads the latest settings from the robotics_config file and updates the PipetteHead and SmartStations
         to ensure current operations use up-to-date configuration values.
         """
 
-        with open(self.robotics_conf_path, "r") as conf:
-            self.robotics_conf = yaml.safe_load(conf)
+        with open(self.robotics_config_path, "r") as conf:
+            self.robotics_config = yaml.safe_load(conf)
 
+    def update_robotics(self):
         for station in self.stations:
-            station.update(self.robotics_conf)
-        self.pipette_head.update(self.robotics_conf)
+            station.update(self.robotics_config)
+        self.pipette_head.update(self.robotics_config)
+        self.arm.update(self.robotics_config)
 
     def stop_robotics(self):
         """Stops all robotics and pump operations due to user intervention.
@@ -1146,9 +1164,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         self.status.state = RoboticsState.STOP
         try:
             for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    pump.hardware.terminateCmd()
-                    pump.hardware.resetChain()
+                if pump.connected:
+                    pump.stop()
             self.arm.set_state(4)
         except (SyringeError, SyringeTimeout) as e:
             logger.error(f"error encountered trying to call stop_robotics(): {e}")
@@ -1164,8 +1181,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             self.status.state = RoboticsState.PAUSE
             self.arm.set_state(3)
             for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    pump.hardware.terminateCmd()
+                if pump.connected:
+                    pump.pause()
         logger.info("Robotics namespace put into PAUSE state")
 
     def resume_robotics(self):
@@ -1173,8 +1190,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             self.status.state = RoboticsState.BUSY
             self.arm.set_state(0)
             for pump in self.pipette_head.pumps:
-                if pump.hardware:
-                    pump.hardware.sendRcv("", execute=True)
+                if pump.connected:
+                    pump.resume()
         logger.info("Robotics namespace put back into BUSY state, resuming previously paused activity.")
 
     def emergency_stop_robotics(self):
@@ -1187,7 +1204,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         try:
             self.stop_robotics()
             for pump in self.pipette_head.pumps:
-                pump.disconnect()
+                pump.disconnect(delete=True)
             self.arm.disconnect()
         except (SyringeError, SyringeTimeout) as e:
             logger.error(f"error encountered trying to call stop_robotics(): {e}")
