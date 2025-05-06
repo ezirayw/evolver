@@ -1,5 +1,5 @@
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 
 from tecancavro.models import XCaliburD
@@ -16,18 +16,6 @@ class FluidTypes(Enum):
     MEDIA = 1
     DRUG = 2
     STERILIZE = 3
-
-
-def dict_factory_pipettehead(data):
-    result = {}
-    for key, value in data:
-        if isinstance(value, Enum):
-            result[key] = (value.name, value.value)
-        if isinstance(value, XCaliburD):
-            result[key] = "XCaliburD"
-        else:
-            result[key] = value
-    return result
 
 
 @dataclass
@@ -250,7 +238,32 @@ class PipetteHead:
         Returns:
             dict: A dictionary containing the current state of the PipetteHead and its components.
         """
-        return asdict(self, dict_factory=dict_factory_pipettehead)
+
+        return {
+            "pumps": [
+                {
+                    "id": pump.id,
+                    "primary": pump.primary.name,
+                    "active_port": pump.active_port,
+                    "connected": pump.connected,
+                    "hardware": "XCaliburD" if pump.hardware else None,
+                    "ports": {
+                        port_id: {
+                            "id": port.id,
+                            "fluid": (port.fluid.name, port.fluid.value),
+                            "starting_volume": port.starting_volume,
+                            "current_volume": port.current_volume,
+                            "primed": port.primed,
+                        }
+                        for port_id, port in pump.ports.items()
+                    },
+                }
+                for pump in self.pumps
+            ],
+            "pump_num": self.pump_num,
+            "universal": self.universal,
+            "num_windows": self.num_windows,
+        }
 
     def update(self, pipette_head_config: dict):
         """Update the PipetteHead based on the input configuration."""
