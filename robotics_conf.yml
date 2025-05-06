@@ -5,8 +5,8 @@ xArm:
   roll: 180
   pitch: 0
   yaw: 0
-  speed: 500
-  mvacc: 500
+  speed: 100
+  mvacc: 100
 
 states:
   - idle
@@ -49,33 +49,61 @@ pipette_head:
   serial_port: ""
   pumps:
     0:
+      connect: False
+      primary: media
       hardware: XCaliburD
       ports:
-        1: media
-        2: sterilize
-      connect: False
+        2:
+          fluid: media
+          primed: False
+          reservoir_volume: 0
+        3:
+          fluid: sterilize
+          primed: False
+          reservoir_volume: 0
     1:
+      connect: False
+      primary: media
       hardware: XCaliburD
       ports:
-        1: media
-        2: sterilize
-      connect: False
+        2:
+          fluid: media
+          primed: False
+          reservoir_volume: 0
+        3:
+          fluid: sterilize
+          primed: False
+          reservoir_volume: 0
     2:
+      connect: False
+      primary: media
       hardware: XCaliburD
       ports:
-        1: media
-        2: sterilize
-      connect: False
-
+        2:
+          fluid: media
+          primed: False
+          reservoir_volume: 0
+        3:
+          fluid: sterilize
+          primed: False
+          reservoir_volume: 0
     3:
+      connect: False
+      primary: media
       hardware: XCaliburD
       ports:
-        1: media
-        2: sterilize
-      connect: False
+        2:
+          fluid: media
+          primed: False
+          reservoir_volume: 0
+        3:
+          fluid: sterilize
+          primed: False
+          reservoir_volume: 0
 
-plane_calibration:
+smart_stations:
   0:
+    connect: True
     plane_out:
       vial0_x: 79
       vial0_y: -471
@@ -89,44 +117,17 @@ plane_calibration:
       vial17_y: -381.2
       z: 429.5
   1:
-    plane_out:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
-    plane_in:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
+    connect: False
+    plane_out: null
+    plane_in: null
   2:
-    plane_out:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
-    plane_in:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
+    connect: False
+    plane_out: null
+    plane_in: null
   3:
-    plane_out:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
-    plane_in:
-      vial0_x: null
-      vial0_y: null
-      vial17_x: null
-      vial17_y: null
-      z: null
+    connect: False
+    plane_out: null
+    plane_in: null
 
 # overflow/volume settings
 overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial

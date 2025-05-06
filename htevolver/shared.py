@@ -3,13 +3,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-class FluidTypes(Enum):
-    EMPTY = 0
-    MEDIA = 1
-    DRUG = 2
-    STERILIZE = 3
-
-
 class RoboticsState(Enum):
     READY = 0
     IDLE = 1
@@ -28,6 +21,7 @@ class RoboticsRoutines(Enum):
     FILLING_VIALS_IPP = 4
     PRIMING_INFLUX = 5
     PRIMING_EFFLUX = 6
+    PUMP_INITIALIZE = 7
 
 
 class CommandTags(Enum):
@@ -49,24 +43,6 @@ class BroadcastData:
 
 #### DATA STORAGE CLASSES ####
 @dataclass
-class ServerResult:
-    done: bool
-    namespace: str
-    routine: str
-    status: dict
-    elapsed_time: float
-    message: str
-
-
-@dataclass
-class SerialCommand:
-    param: str
-    address: int
-    value: list[int]
-    tag: CommandTags
-
-
-@dataclass
 class EvolverCommand:
     param: str
     address: int
@@ -77,97 +53,12 @@ class EvolverCommand:
 
 #### STATUS MANAGEMENT CLASSES ####
 @dataclass
-class xArmStatus:
-    warning_code: int = 0
-    error_code: int = 0
-    state: int = 0
-    connected: bool = False
-
-
-@dataclass
-class RoboticsStatus:
-    state: RoboticsState
-    routine: RoboticsRoutines
-    active_station: int
-    active_pumps: list[dict]
-    vial_window: list[int]
-    xArm: xArmStatus
-
-    def to_dict(self):
-        return {
-            "state": self.state.value,
-            "routine": self.routine.value,
-            "active_station": self.active_station,
-            "active_pumps": self.active_pumps,
-            "vial_window": self.vial_window,
-            "xArm": {
-                "warning_code": self.xArm.warning_code,
-                "error_code": self.xArm.error_code,
-                "arm_state": self.xArm.state,
-                "connected": self.xArm.connected,
-            },
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict):
-        return cls(
-            state=RoboticsState(data["state"]),
-            routine=RoboticsRoutines(data["routine"]),
-            active_station=data["active_station"],
-            active_pumps=data["active_pumps"],
-            vial_window=data["vial_window"],
-            xArm=xArmStatus(
-                warning_code=data["xArm"]["warning_code"],
-                error_code=data["xArm"]["error_code"],
-                state=data["xArm"]["arm_state"],
-                connected=data["xArm"]["connected"],
-            ),
-        )
-
-
-@dataclass
-class EvolverStatus:
-    phase: int
-    command_queue: list[SerialCommand]
-    running_immediate: bool
-    running_broadcast: bool
-
-    def to_dict(self):
-        return {
-            "phase": self.phase,
-            "command_queue": [
-                {"param": command.param, "address": command.address, "value": command.value, "tag": command.tag.value}
-                for command in self.command_queue
-            ],
-            "running_immediate": self.running_immediate,
-            "running_broadcast": self.running_broadcast,
-        }
-
-    @classmethod
-    def from_dict(cls, data):
-        command_queue = []
-        for command in data["command_queue"]:
-            command_queue.append(
-                SerialCommand(
-                    param=command["param"], address=command["address"], value=command["value"], tag=CommandTags(command["tag"])
-                )
-            )
-
-        return cls(
-            phase=data["phase"],
-            command_queue=command_queue,
-            running_immediate=data["running_immediate"],
-            running_broadcast=data["running_broadcast"],
-        )
-
-
-@dataclass
 class HTEvolverStatus:
     connected: bool = field(default=False)
     start_time: float = field(default=0.0)
     elapsed_time: float = field(default=0.0)
-    evolver_ns: EvolverStatus = field(init=False)
-    robotics_ns: RoboticsStatus = field(init=False)
+    evolver: dict = field(default_factory=dict)
+    robotics: dict = field(default_factory=dict)
 
     def get_elapsed_time(self):
         """Get the current elapsed time since experiment start (in hours)."""

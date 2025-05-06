@@ -6,7 +6,8 @@ import numpy as np
 import socketio
 from data_analysis import CalibrationData
 
-from htevolver.shared import BroadcastData, EvolverCommand, EvolverStatus, HTEvolverStatus
+from htevolver.exceptions import EvolverError
+from htevolver.shared import BroadcastData, EvolverCommand, HTEvolverStatus
 
 logger = logging.getLogger(__name__)
 
@@ -90,29 +91,15 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         namespace: str = "/evolver",
         station_ids: list[int] = [0, 1, 2, 3],
         data_window_length: int = 10,
-        address_table: dict[str, int] = {
-            "od_led_left": 4,
-            "od_led_right": 5,
-            "od_90_left": 6,
-            "od_90_right": 7,
-            "temp": 8,
-            "stir": 9,
-            "overflow_left": 10,
-            "overflow_right": 11,
-            "temp_config": 12,
-            "ipp": 13,
-            "ipp_config": 14,
-        },
     ):
         super().__init__(namespace)
         self.save: bool = save
         self.directory: str = directory
         self.status: HTEvolverStatus = status
-        self.status.evolver_ns = EvolverStatus(phase=0, command_queue=[], running_immediate=False, running_broadcast=False)
         self.data_window_length: int = data_window_length
-        self.parameter_address_table = address_table
         self.broadcast_counter = 0
         self.stations: list[SmartStationClient] = []
+        self.address_table: dict = {}
         for station_id in station_ids:
             self.stations.append(SmartStationClient(station_id))
 
@@ -145,6 +132,11 @@ class EvolverClientNamespace(socketio.ClientNamespace):
 
     def on_get_types(self, data): ...
 
+    def on_get_address_table(self, data):
+        self.address_table = data
+
+    def request_address_table(self, data): ...
+
     def request_calibration(self, target_param: str):
         self.emit("request_calibration", target_param)
         logger.info(f"Requesting eVOLVER calibrations for: {target_param}")
@@ -176,19 +168,18 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         immediate: bool,
         recurring: bool,
     ):
-        # check that target parameter is in the address table, if so build and send the command
-        if parameter in self.parameter_address_table:
-            command = EvolverCommand(
-                param=parameter,
-                address=self.parameter_address_table[parameter],
-                value=values,
-                immediate=immediate,
-                recurring=recurring,
-            )
-            self.emit("command", asdict(command))
-            logger.info(f"Following command sent to the server via the eVOLVER namespace: {command}")
+        if parameter in self.address_table:
+            try:
+                command = EvolverCommand(
+                    param=parameter, address=self.address_table[parameter], value=values, immediate=immediate, recurring=recurring
+                )
+                self.emit("command", asdict(command))
+                logger.info(f"Following command sent to the server via the eVOLVER namespace: {command}")
+            except ValueError as e:
+                logger.error(f"Error trying to build valid EvolverCommand: {e}")
         else:
-            logger.error(f"Could not find {parameter} in address table")
+            logger.error(f"Passed parameter is not valid: {parameter}")
+            raise EvolverError(f"Passed parameter is not valid: {parameter}")
 
     def change_ipp_frequency(self, frequency_commands: dict[int, int]):
         """Update EffluxBoard `frequency` configurations.

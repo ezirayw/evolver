@@ -3,9 +3,10 @@ import os
 import time
 
 import socketio
-from evolver_namespace_client import EvolverClientNamespace
-from robotics_namespace_client import RoboticsClientNamespace
 from shared import HTEvolverStatus
+
+from htevolver.htevolver_client.evolver_namespace_client import EvolverClientNamespace
+from htevolver.htevolver_client.robotics_namespace_client import RoboticsClientNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,7 @@ class HTEvolverClient:
         self.sio.register_namespace(self.robotics)
 
     def connect(self) -> None:
-        """
-        Connect to the eVOLVER server.
+        """Connect to HTeVOLVER.
 
         This initiates connection to both the eVOLVER and robotics namespaces.
         After connection, it requests calibration data for temperature and OD sensors.
@@ -103,17 +103,17 @@ class HTEvolverClient:
             self.robotics.request_robotics_conf()
             self.robotics.request_types()
 
-            logger.info("Successfully connected to HT Evolver server")
+            logger.info("Successfully connected to the HTeVOLVER server")
         except Exception as e:
             logger.error(f"Failed to connect to HT Evolver server: {e}")
             raise ConnectionError(f"Could not connect to HT Evolver server: {e}")
 
     def disconnect(self) -> None:
-        """Disconnect from the eVOLVER server."""
+        """Disconnect from HTeVOLVER."""
         if self.connected:
             try:
                 self.sio.disconnect()
                 self.connected = False
-                logger.info("Disconnected from HT Evolver server")
+                logger.info("Disconnected from the HTeVOLVER server")
             except Exception as e:
                 logger.error(f"Error during disconnection: {e}")

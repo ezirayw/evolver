@@ -3,7 +3,7 @@ import time
 
 import socketio
 
-from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState, RoboticsStatus, xArmStatus
+from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.save: bool = save
         self.directory: str = directory
         self.status: HTEvolverStatus = status
-        self.status.robotics_ns = RoboticsStatus(
-            state=RoboticsState.IDLE,
-            routine=RoboticsRoutines.NO_ROUTINE,
-            active_station=-1,
-            active_pumps=[],
-            vial_window=[],
-            xArm=xArmStatus(),
-        )
+        self.status.robotics = {}
         self.server_conf: dict = {}
         self.server_types: dict[str, dict[str, int]] = {}
         self.ack: bool = False
@@ -64,11 +57,11 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         logger.info("Client reconnected to HTeVOLVER server via robotics namespace")
 
     def on_broadcast(self, broadcast_data: dict):
-        self.status.robotics_ns = RoboticsStatus.from_dict(broadcast_data)
+        self.robotics_ns = broadcast_data
         logger.info(f"Robotics namespace broadcast: {self.status}")
 
     def on_get_status(self, status: dict):
-        self.status.robotics_ns = RoboticsStatus.from_dict(status)
+        self.robotics_ns = status
         logger.info(f"Robotics namespace broadcast processed: {self.status}")
 
     def on_get_conf(self, data: dict):
@@ -121,7 +114,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         while not self.ack:
             time.sleep(0.1)
 
-        if self.status.robotics_ns.routine == RoboticsRoutines.NO_ROUTINE:
+        if self.robotics_ns["routine"] == RoboticsRoutines.NO_ROUTINE:
             return True
         else:
             return False

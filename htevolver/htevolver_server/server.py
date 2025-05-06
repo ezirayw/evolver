@@ -48,8 +48,8 @@ async def broadcast_loop(app: Application):
 
         if (
             (last_time == 0.0 or (current_time - last_time >= app["broadcast_timing"]))
-            and not app["evolver_namespace"].status.running_immediate
-            and not app["evolver_namespace"].status.running_broadcast
+            and not app["evolver_namespace"].running_immediate
+            and not app["evolver_namespace"].running_broadcast
         ):
             logger.info("Starting Broadcast Loop")
             start_time = time.time()
