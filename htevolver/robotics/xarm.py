@@ -1,25 +1,11 @@
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
 from xarm.wrapper import XArmAPI
 
 from htevolver.exceptions import xArmError
 
 logger = logging.getLogger(__name__)
-
-
-def dict_factory_xarm(data):
-    result = {}
-    for key, value in data:
-        logger.debug(data)
-        print(data)
-        if isinstance(value, XArmAPI):
-            result[key] = "xArmAPI"
-            logger.debug(result)
-        else:
-            result[key] = value
-            logger.debug(result)
-    return result
 
 
 @dataclass
@@ -167,6 +153,17 @@ class xArm:
         self.arm_api.register_connect_changed_callback(callback=connect_changed_callback)
 
     def to_dict(self):
-        logger.debug(f"asdict without custom: {asdict(self)}")
-        logger.debug(f"asdict with custom: {asdict(self, dict_factory=dict_factory_xarm)}")
-        return asdict(self, dict_factory=dict_factory_xarm)
+        return {
+            "ip": self.ip,
+            "roll": self.roll,
+            "pitch": self.pitch,
+            "yaw": self.yaw,
+            "speed": self.speed,
+            "mvacc": self.mvacc,
+            "warning_code": self.warning_code,
+            "error_code": self.error_code,
+            "state": self.state,
+            "connected": self.connected,
+            "max_speed": self.max_speed,
+            "max_mvacc": self.max_mvacc,
+        }
