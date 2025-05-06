@@ -11,10 +11,13 @@ logger = logging.getLogger(__name__)
 def dict_factory_xarm(data):
     result = {}
     for key, value in data:
+        logger.debug(data)
         if isinstance(value, XArmAPI):
             result[key] = "xArmAPI"
+            logger.debug(result)
         else:
             result[key] = value
+            logger.debug(result)
     return result
 
 
@@ -52,7 +55,7 @@ class xArm:
     @classmethod
     def create(cls, config: dict):
         return cls(
-            arm_api=XArmAPI(config["ip"], enable_report=True, do_not_open=config["connect"]),
+            arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=config["connect"]),
             ip=config["ip"],
             roll=config["roll"],
             pitch=config["pitch"],

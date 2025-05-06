@@ -56,11 +56,11 @@ pipette_head:
         2:
           fluid: media
           primed: False
-          reservoir_volume: 0
+          volume: 0
         3:
           fluid: sterilize
           primed: False
-          reservoir_volume: 0
+          volume: 0
     1:
       connect: False
       primary: media
@@ -69,11 +69,11 @@ pipette_head:
         2:
           fluid: media
           primed: False
-          reservoir_volume: 0
+          volume: 0
         3:
           fluid: sterilize
           primed: False
-          reservoir_volume: 0
+          volume: 0
     2:
       connect: False
       primary: media
@@ -82,11 +82,11 @@ pipette_head:
         2:
           fluid: media
           primed: False
-          reservoir_volume: 0
+          volume: 0
         3:
           fluid: sterilize
           primed: False
-          reservoir_volume: 0
+          volume: 0
     3:
       connect: False
       primary: media
@@ -95,11 +95,11 @@ pipette_head:
         2:
           fluid: media
           primed: False
-          reservoir_volume: 0
+          volume: 0
         3:
           fluid: sterilize
           primed: False
-          reservoir_volume: 0
+          volume: 0
 
 smart_stations:
   0:

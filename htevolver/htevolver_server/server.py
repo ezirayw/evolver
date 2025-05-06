@@ -84,13 +84,13 @@ async def broadcast_loop(app: Application):
 async def background_tasks(app):
     """Start background tasks after app startup"""
     app["broadcast_task"] = asyncio.create_task(broadcast_loop(app))
-    logger.debug("starting")
+    logger.debug("starting broadcast task")
 
     yield
     logger.debug("closing background broadcast loop")
     app["broadcast_task"].cancel()
     with contextlib.suppress(asyncio.CancelledError):
-        logger.debug("handling close")
+        logger.debug("handling broadcast task close")
         await app["broadcast_task"]
 
 

@@ -2,10 +2,11 @@ import logging
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
-from exceptions import PipetteHeadError, RoboticsError
 from tecancavro.models import XCaliburD
 from tecancavro.syringe import SyringeError, SyringeTimeout
 from tecancavro.transport import TecanAPISerial
+
+from htevolver.exceptions import PipetteHeadError, RoboticsError
 
 logger = logging.getLogger(__name__)
 
@@ -161,23 +162,29 @@ class PipetteHead:
     @classmethod
     def create(cls, config: dict):
         pumps: list[Pump] = [Pump(0), Pump(1), Pump(2), Pump(3)]
+        logger.debug(f"PipetteHead created using the config: {config}")
         for pump_id, pump in enumerate(pumps):
-            if config["pumps"][pump_id]["primary"].upper() in FluidTypes.__members__:
-                pump.primary = FluidTypes[config["pumps"]["primary"]]
+            try:
+                pump.primary = FluidTypes[config["pumps"][pump_id]["primary"].upper()]
+            except KeyError:
+                logger.warning(
+                    f"Invalid primary fluid type configuration for PipetteHead Pump_{pump_id}, using default {pump.primary}: {config['pumps'][pump_id]['primary']}"
+                )
 
             for port_id, port_config in config["pumps"][pump_id]["ports"].items():
-                if port_config["fluid"].upper() in FluidTypes.__members__:
+                logger.debug(f"PipetteHead Pump_{pump_id} Port_{port_id} created using the config: {port_config}")
+                try:
                     pump.ports[port_id] = PumpPort(
                         id=port_id,
-                        fluid=FluidTypes[port_config["fluid"]],
-                        starting_volume=port_config["current_volume"],
-                        current_volume=port_config["current_volume"],
+                        fluid=FluidTypes[port_config["fluid"].upper()],
+                        starting_volume=port_config["volume"],
+                        current_volume=port_config["volume"],
                         primed=port_config["primed"],
                     )
-                else:
+                except KeyError:
                     pump.ports[port_id] = PumpPort(id=port_id)
                     logger.warning(
-                        f"Invalid fluid type found in config: {port_config['fluid_type']}, defaulting to EMPTY for position_{pump_id}"
+                        f"Invalid fluid type configuration for Port_{port_id} in PipetteHead Pump__{pump_id}, using default {pump.ports[port_id].fluid}: {port_config['fluid']}"
                     )
             pump.serial_port = config["serial_port"]
             pump.connected = config["pumps"][pump_id]["connect"]
