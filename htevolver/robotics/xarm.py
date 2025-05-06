@@ -12,6 +12,7 @@ def dict_factory_xarm(data):
     result = {}
     for key, value in data:
         logger.debug(data)
+        print(data)
         if isinstance(value, XArmAPI):
             result[key] = "xArmAPI"
             logger.debug(result)
@@ -166,4 +167,6 @@ class xArm:
         self.arm_api.register_connect_changed_callback(callback=connect_changed_callback)
 
     def to_dict(self):
+        logger.debug(f"asdict without custom: {asdict(self)}")
+        logger.debug(f"asdict with custom: {asdict(self, dict_factory=dict_factory_xarm)}")
         return asdict(self, dict_factory=dict_factory_xarm)
