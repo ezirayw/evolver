@@ -27,6 +27,8 @@ class xArmCoordinate:
 class xArm:
     arm_api: XArmAPI
     ip: str
+    connected: bool
+
     roll: int
     pitch: int
     yaw: int
@@ -35,7 +37,6 @@ class xArm:
     warning_code: int = field(default=0)
     error_code: int = field(default=0)
     state: int = field(default=0)
-    connected: bool = field(default=False)
     max_speed: int = field(default=1000)
     max_mvacc: int = field(default=1000)
 
@@ -44,6 +45,7 @@ class xArm:
         return cls(
             arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=config["connect"]),
             ip=config["ip"],
+            connected=config.get("connect", False),
             roll=config["roll"],
             pitch=config["pitch"],
             yaw=config["yaw"],

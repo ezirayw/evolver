@@ -3,6 +3,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+class FluidTypes(Enum):
+    EMPTY = 0
+    MEDIA = 1
+    DRUG = 2
+    STERILIZE = 3
+
+
 class RoboticsState(Enum):
     READY = 0
     IDLE = 1

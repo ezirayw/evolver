@@ -516,7 +516,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         if vial:
                             target_pump = self.pipette_head.pumps[index]
                             for fluid_type, volume in getattr(pump_commands, f"vial_{vial}").items():
-                                if target_pump.primary == FluidTypes[fluid_type]:
+                                if target_pump.primary_fluid == FluidTypes[fluid_type]:
                                     pipette_volumes[index] = volume
                                     # Remove the command after use to avoid duplicates
                                     getattr(pump_commands, f"vial_{vial}").pop(fluid_type)

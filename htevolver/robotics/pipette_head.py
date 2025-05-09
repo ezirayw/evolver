@@ -1,30 +1,40 @@
 import logging
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
+from typing import ClassVar
 
 from tecancavro.models import XCaliburD
 from tecancavro.syringe import SyringeError, SyringeTimeout
 from tecancavro.transport import TecanAPISerial
 
 from htevolver.exceptions import PipetteHeadError, RoboticsError
+from htevolver.robotics.interfaces import PumpProtocol
+from htevolver.shared import FluidTypes
 
 logger = logging.getLogger(__name__)
-
-
-class FluidTypes(Enum):
-    EMPTY = 0
-    MEDIA = 1
-    DRUG = 2
-    STERILIZE = 3
 
 
 @dataclass
 class PumpPort:
     id: int
-    fluid: FluidTypes = field(default=FluidTypes.EMPTY)
-    starting_volume: int = field(default=0)
-    current_volume: int = field(default=0)
-    primed: bool = field(default=False)
+    fluid: FluidTypes
+    starting_volume: int
+    current_volume: int
+    primed: bool
+
+    @classmethod
+    def create(cls, port_id: int, port_config: dict):
+        fluid = (
+            FluidTypes[port_config.get("fluid", "empty")]
+            if port_config.get("fluid", "empty") in FluidTypes.__members__
+            else FluidTypes.EMPTY
+        )
+        return cls(
+            id=port_id,
+            fluid=fluid,
+            starting_volume=port_config.get("volume", 0),
+            current_volume=port_config.get("volume", 0),
+            primed=port_config.get("primed", False),
+        )
 
     def update(self, port_config: dict):
         for config_parameter, value in port_config.items():
@@ -33,12 +43,85 @@ class PumpPort:
                 attr_type = type(attribute_value)
                 try:
                     new_value = attr_type(value)
-                    setattr(self, config_parameter, new_value)
+                    if new_value != attribute_value:
+                        setattr(self, config_parameter, new_value)
                 except (ValueError, TypeError):
                     logger.warning(
                         f"Invalid type for {config_parameter}: expected {attr_type.__name__}, got {type(value).__name__}"
                     )
                 logger.debug(f"Updated PumpPort_{self.id} parameter: {config_parameter}={value}")
+
+    def to_dict(self): ...
+
+
+@dataclass
+class DummyPump:
+    id: int
+    connected: bool
+
+    primary_fluid: FluidTypes
+    ports: dict[int, PumpPort]
+    head_port: int
+    active_port: int
+
+    @classmethod
+    def create(cls, pump_id: int, pump_config: dict) -> "DummyPump":
+        ports: dict[int, PumpPort] = {}
+        for port_id, port_config in enumerate(pump_config.get("ports", {})):
+            ports[port_id] = PumpPort.create(port_id, port_config)
+        return cls(
+            id=pump_id,
+            primary_fluid=FluidTypes.EMPTY,
+            ports=ports,
+            head_port=pump_config.get("head_port", 0),
+            active_port=0,
+            connected=pump_config.get("connect", False),
+        )
+
+    def connect(self) -> None:
+        """Connect to the pump hardware."""
+        logger.info(f"Connected dummy pump_{self.id}")
+
+    def disconnect(self, delete: bool = False) -> None:
+        """Disconnect from the pump hardware."""
+        logger.info(f"Disconnected dummy pump_{self.id}")
+
+    def initialize(self) -> None:
+        """Initialize the pump hardware."""
+        logger.info(f"Disconnected dummy pump_{self.id}")
+
+    def aspirate(self, volume: int) -> None:
+        """Aspirate the specified volume."""
+        logger.info(f"Aspirating volume_{volume} on dummy pump_{self.id}")
+
+    def dispense(self, volume: int) -> None:
+        """Dispense the specified volume."""
+        logger.info(f"Dispensing volume_{volume} on dummy pump_{self.id}")
+
+    def prime(self) -> None:
+        """Prime the pump for use."""
+        logger.info(f"Priming dummy pump{self.id}")
+
+    def pause(self) -> None:
+        """Pause the current pump operation."""
+        logger.info(f"Pausing dummy pump_{self.id}")
+
+    def stop(self) -> None:
+        """Stop the current pump operation."""
+        logger.info(f"Stopping dummy pump_{self.id}")
+
+    def resume(self) -> None:
+        """Resume a paused operation."""
+        logger.info(f"Resuming dummy pump_{self.id}")
+
+    def update(self, pump_config: dict) -> None:
+        """Update pump configuration from a dictionary."""
+        logger.info(f"Updating dummy pump_{self.id}")
+
+    def to_dict(self) -> dict:
+        """Serialize the pump to a dictionary"""
+        logger.info(f"Serializing dummy pump_{self.id} to a dictionary")
+        return {"yo": "dummy"}
 
 
 #### DECORATORS ####
@@ -66,34 +149,67 @@ def pump_action(func):
 
 
 @dataclass
-class Pump:
+class XCaliburDPump:
     id: int
-    primary: FluidTypes = field(default=FluidTypes.EMPTY)
-    ports: dict[int, PumpPort] = field(default_factory=dict)
-    serial_port: str = field(default="")
-    head_port: int = field(default=1)
-    active_port: int = field(default=2)
-    connected: bool = field(default=False)
-    hardware: XCaliburD = field(init=False)
+    connected: bool
 
-    def __post_init__(self):
-        if self.connected:
-            self.hardware = XCaliburD(
-                com_link=TecanAPISerial(self.id, ser_port=self.serial_port, ser_baud=9600),
-            )
+    hardware_api: XCaliburD
+    primary_fluid: FluidTypes
+    ports: dict[int, PumpPort]
+    head_port: int
+    active_port: int
+
+    @classmethod
+    def create(cls, pump_id: int, pump_config: dict) -> "XCaliburDPump":
+        fluid = (
+            FluidTypes[pump_config.get("fluid", "empty")]
+            if pump_config.get("fluid", "empty") in FluidTypes.__members__
+            else FluidTypes.EMPTY
+        )
+        ports: dict[int, PumpPort] = {}
+        for port_id, port_config in enumerate(pump_config.get("ports", {})):
+            ports[port_id] = PumpPort.create(port_id, port_config)
+        return cls(
+            id=pump_id,
+            hardware_api=XCaliburD(
+                com_link=TecanAPISerial(id, ser_port=pump_config["serial_port"], ser_baud=9600),
+            ),
+            primary_fluid=fluid,
+            ports=ports,
+            head_port=pump_config.get("head_port", 0),
+            active_port=0,
+            connected=pump_config.get("connect", False),
+        )
 
     def connect(self):
         self.connected = True
-        # TODO check if hardware com_link exists, if not, re-establish
+        # TODO check if hardware_api com_link exists, if not, re-establish
 
     def disconnect(self, delete: bool = False):
         if delete:
-            del self.hardware.com_link
+            del self.hardware_api.com_link
         self.connected = False
+
+    def update(self, pump_config: dict):
+        if pump_config["primary_fluid"] in FluidTypes.__members__:
+            self.primary_fluid = FluidTypes[pump_config["primary_fluid"]]
+        for port_id, port in pump_config.items():
+            port.update(pump_config[port_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "primary_fluid": (self.primary_fluid.name, self.primary_fluid.value),
+            "ports": {port_id: port.to_dict() for port_id, port in self.ports.items()},
+            "head_port": self.head_port,
+            "active_port": self.active_port,
+            "connected": self.connected,
+            "hardware_api": "XCaliburD",
+        }
 
     @pump_action
     def initialize(self):
-        self.hardware.init()
+        self.hardware_api.init()
 
     @pump_action
     def aspirate(self, volume: int):
@@ -104,87 +220,65 @@ class Pump:
             else:
                 raise RoboticsError(f"Cannot aspirate: Need to exchange fluid reservoir(s) for PipetteHead Pump_{self.id}")
 
-        self.hardware.extract(self.active_port, volume)
-        delay = self.hardware.executeChain()
-        self.hardware.waitReady(delay)
+        self.hardware_api.extract(self.active_port, volume)
+        delay = self.hardware_api.executeChain()
+        self.hardware_api.waitReady(int(delay))
 
     @pump_action
     def dispense(self, volume: int):
-        self.hardware.dispense(self.head_port, volume)
-        delay = self.hardware.executeChain()
-        self.hardware.waitReady(delay)
+        self.hardware_api.dispense(self.head_port, volume)
+        delay = self.hardware_api.executeChain()
+        self.hardware_api.waitReady(int(delay))
 
     @pump_action
     def prime(self):
         for port_id, port in self.ports.items():
-            self.hardware.primePort(in_port=port_id, out_port=self.head_port, volume_ul=800)
+            self.hardware_api.primePort(in_port=port_id, out_port=self.head_port, volume_ul=800)
 
     @pump_action
     def pause(self):
-        self.hardware.terminateCmd()
+        self.hardware_api.terminateCmd()
 
     @pump_action
     def stop(self):
-        self.hardware.terminateCmd()
-        self.hardware.resetChain()
+        self.hardware_api.terminateCmd()
+        self.hardware_api.resetChain()
 
     @pump_action
     def resume(self):
-        self.hardware.sendRcv("", execute=True)
-
-    def update(self, pump_config: dict):
-        if pump_config["primary"] in FluidTypes.__members__:
-            self.primary = FluidTypes[pump_config["primary"]]
-        for port_id, port in pump_config.items():
-            port.update(pump_config[port_id])
+        self.hardware_api.sendRcv("", execute=True)
 
 
 @dataclass
 class PipetteHead:
-    pumps: list[Pump]
+    pumps: tuple[PumpProtocol, ...]
     pump_num: int
     universal: bool
     num_windows: int
-    active_pumps: list[Pump] = field(default_factory=list)
+    active_pumps: list[PumpProtocol]
+    pump_factory: ClassVar[dict[str, type[PumpProtocol]]] = {"dummy": DummyPump, "XCaliburD": XCaliburDPump}
 
     @classmethod
     def create(cls, config: dict):
-        pumps: list[Pump] = [Pump(0), Pump(1), Pump(2), Pump(3)]
-        logger.debug(f"PipetteHead created using the config: {config}")
-        for pump_id, pump in enumerate(pumps):
-            try:
-                pump.primary = FluidTypes[config["pumps"][pump_id]["primary"].upper()]
-            except KeyError:
-                logger.warning(
-                    f"Invalid primary fluid type configuration for PipetteHead Pump_{pump_id}, using default {pump.primary}: {config['pumps'][pump_id]['primary']}"
-                )
+        pumps: list[PumpProtocol] = []
+        for pump_id in range(4):
+            pump_type_key = config.get(pump_id, "dummy")
+            pumps.append(cls.pump_factory[pump_type_key]().create(pump_id, config[pump_id]))
 
-            for port_id, port_config in config["pumps"][pump_id]["ports"].items():
-                logger.debug(f"PipetteHead Pump_{pump_id} Port_{port_id} created using the config: {port_config}")
-                try:
-                    pump.ports[port_id] = PumpPort(
-                        id=port_id,
-                        fluid=FluidTypes[port_config["fluid"].upper()],
-                        starting_volume=port_config["volume"],
-                        current_volume=port_config["volume"],
-                        primed=port_config["primed"],
-                    )
-                except KeyError:
-                    pump.ports[port_id] = PumpPort(id=port_id)
-                    logger.warning(
-                        f"Invalid fluid type configuration for Port_{port_id} in PipetteHead Pump__{pump_id}, using default {pump.ports[port_id].fluid}: {port_config['fluid']}"
-                    )
-            pump.serial_port = config["serial_port"]
-            pump.connected = config["pumps"][pump_id]["connect"]
-
-        pump_num: int = sum(1 for pump in pumps if pump.primary == FluidTypes.EMPTY)
-        universal: bool = all(pump.primary == pumps[0].primary for pump in pumps)
+        pump_num: int = sum(1 for pump in pumps if pump.primary_fluid == FluidTypes.EMPTY)
+        universal: bool = all(pump.primary_fluid == pumps[0].primary_fluid for pump in pumps)
         num_windows: int = 0
         if pump_num != 0 and universal:
             num_windows = int(6 / pump_num)
         if pump_num != 0 and not universal:
             num_windows = 6 + (pump_num - 1)
-        return cls(pumps=pumps, pump_num=pump_num, universal=universal, num_windows=num_windows)
+        return cls(
+            pumps=tuple(pumps),
+            pump_num=pump_num,
+            universal=universal,
+            num_windows=num_windows,
+            active_pumps=[],
+        )
 
     def stop(self):
         for pump in self.active_pumps:
@@ -240,26 +334,7 @@ class PipetteHead:
         """
 
         return {
-            "pumps": [
-                {
-                    "id": pump.id,
-                    "primary": pump.primary.name,
-                    "active_port": pump.active_port,
-                    "connected": pump.connected,
-                    "hardware": "XCaliburD" if pump.hardware else None,
-                    "ports": {
-                        port_id: {
-                            "id": port.id,
-                            "fluid": (port.fluid.name, port.fluid.value),
-                            "starting_volume": port.starting_volume,
-                            "current_volume": port.current_volume,
-                            "primed": port.primed,
-                        }
-                        for port_id, port in pump.ports.items()
-                    },
-                }
-                for pump in self.pumps
-            ],
+            "pumps": [{pump.id: pump.to_dict() for pump in self.pumps}],
             "pump_num": self.pump_num,
             "universal": self.universal,
             "num_windows": self.num_windows,

@@ -51,7 +51,8 @@ pipette_head:
     0:
       connect: False
       primary: media
-      hardware: XCaliburD
+      type: XCaliburD
+      head_port: 1
       ports:
         2:
           fluid: media
@@ -64,7 +65,7 @@ pipette_head:
     1:
       connect: False
       primary: media
-      hardware: XCaliburD
+      type: XCaliburD
       ports:
         2:
           fluid: media
@@ -77,7 +78,7 @@ pipette_head:
     2:
       connect: False
       primary: media
-      hardware: XCaliburD
+      type: XCaliburD
       ports:
         2:
           fluid: media
@@ -90,7 +91,7 @@ pipette_head:
     3:
       connect: False
       primary: media
-      hardware: XCaliburD
+      type: XCaliburD
       ports:
         2:
           fluid: media
