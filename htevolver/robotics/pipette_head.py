@@ -257,13 +257,23 @@ class PipetteHead:
     num_windows: int
     active_pumps: list[PumpProtocol]
     pump_factory: ClassVar[dict[str, type[PumpProtocol]]] = {"dummy": DummyPump, "XCaliburD": XCaliburDPump}
+    dummy_pump_config: ClassVar[dict] = {
+        "connect": False,
+        "primary_fluid": FluidTypes.EMPTY,
+        "ports": {1: {"connect": False, "primed": False, "volume": 0}, 2: {"connect": False, "primed": False, "volume": 0}},
+        "head_port": 0,
+        "active_port": 0,
+    }
 
     @classmethod
     def create(cls, config: dict):
         pumps: list[PumpProtocol] = []
         for pump_id in range(4):
             pump_type_key = config.get(pump_id, "dummy")
-            pumps.append(cls.pump_factory[pump_type_key]().create(pump_id, config[pump_id]))
+            if pump_type_key != "dummy":
+                pumps.append(cls.pump_factory[pump_type_key]().create(pump_id, config[pump_id]))
+            else:
+                pumps.append(cls.pump_factory[pump_type_key]().create(pump_id, cls.dummy_pump_config[pump_id]))
 
         pump_num: int = sum(1 for pump in pumps if pump.primary_fluid == FluidTypes.EMPTY)
         universal: bool = all(pump.primary_fluid == pumps[0].primary_fluid for pump in pumps)
