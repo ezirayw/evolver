@@ -147,8 +147,8 @@ def init() -> web.Application:
         ```
     """
     # Load configs
-    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/htevolver", EVOLVER_CONF_FILENAME))
-    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/htevolver", ROBOTICS_CONF_FILENAME))
+    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", EVOLVER_CONF_FILENAME))
+    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", ROBOTICS_CONF_FILENAME))
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:

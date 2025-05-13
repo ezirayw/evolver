@@ -90,7 +90,7 @@ class xArm:
             ```
         """
         return cls(
-            arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=config["connect"]),
+            arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=True),
             ip=config["ip"],
             connected=config.get("connect", False),
             roll=config["roll"],

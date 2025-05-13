@@ -72,19 +72,19 @@ class EvolverCommand:
         """
         cls.parameter_table: dict = {}
         # Extract from phase_0
-        if "phase_0" in parameter_config:
+        if parameter_config["phase_0"]:
             for param, config in parameter_config["phase_0"].items():
                 if "address" in config:
                     cls.parameter_table[param] = (config["address"], "phase_0", config["data_length"])
 
         # Extract from phase_1
-        if "phase_1" in parameter_config:
+        if parameter_config["phase_1"]:
             for param, config in parameter_config["phase_1"].items():
                 if "address" in config:
                     cls.parameter_table[param] = (config["address"], "phase_1", config["data_length"])
 
         # Extract from phase_2 if it exists
-        if "phase_2" in parameter_config:
+        if parameter_config["phase_2"]:
             for param, config in parameter_config["phase_2"].items():
                 if "address" in config:
                     cls.parameter_table[param] = (config["address"], "phase_2", config["data_length"])

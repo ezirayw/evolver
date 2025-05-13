@@ -231,7 +231,7 @@ def pump_action(func: Callable):
         ```
     """
 
-    async def wrapper(self: XCaliburDPump, *args, **kwargs):
+    async def wrapper(self, *args, **kwargs):
         if self.enabled:
             try:
                 func(self, *args, **kwargs)

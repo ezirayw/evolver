@@ -25,10 +25,10 @@ import sys
 
 import numpy as np
 import socketio
-from htevolver_client.data_analysis import CalibrationData, GraphCalibration
 from scipy.optimize import curve_fit
 
 from htevolver.htevolver_client.client import HTEvolverClient
+from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
 # Configure logging
 logger = logging.getLogger(__name__)
