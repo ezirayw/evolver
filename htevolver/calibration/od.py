@@ -241,7 +241,7 @@ if __name__ == "__main__":
     else:
         station_list = [0, 1, 2, 3]
 
-    htevolver_client = HTEvolverClient(evolver_ip, False, station_ids=station_list)
+    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
     socketIO_eVOLVER = socketio.Client()
     socketIO_eVOLVER.register_namespace(htevolver_client)
     socketIO_eVOLVER.connect("http://{0}:{1}".format(evolver_ip, 8081))

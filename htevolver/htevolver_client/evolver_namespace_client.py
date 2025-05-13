@@ -102,8 +102,8 @@ class SmartStationClient:
     temp_setting: int = field(default=25)
     stir_setting: float = field(default=0.0)
 
-    temp_cal: CalibrationData = field(init=False)
-    od_cal: dict[int, CalibrationData] = field(init=False)
+    temp_cal: CalibrationData = field(default=None)
+    od_cal: dict[int, CalibrationData] = field(default_factory=dict)
 
     @classmethod
     def create(cls, station_id: int, data_buffer_size: int):
