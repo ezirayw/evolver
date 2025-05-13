@@ -3,10 +3,10 @@ import os
 import time
 
 import socketio
-from shared import HTEvolverStatus
 
 from htevolver.htevolver_client.evolver_namespace_client import EvolverClientNamespace
 from htevolver.htevolver_client.robotics_namespace_client import RoboticsClientNamespace
+from htevolver.shared import HTEvolverStatus
 
 logger = logging.getLogger(__name__)
 

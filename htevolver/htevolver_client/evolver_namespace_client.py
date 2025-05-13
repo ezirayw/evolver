@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import socketio
-from data_analysis import CalibrationData
 
+from htevolver.htevolver_client.data_analysis import CalibrationData
 from htevolver.shared import BroadcastData, HTEvolverStatus
 
 logger = logging.getLogger(__name__)
