@@ -3,27 +3,153 @@ import logging
 import os
 import struct
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import ClassVar
 
 import serial
 import socketio
 import yaml
 
 from htevolver.exceptions import EvolverError, EvolverSerialError
-from htevolver.shared import BroadcastData, CommandTags, EvolverCommand
+from htevolver.htevolver_client.data_analysis import CalibrationData
+from htevolver.shared import BroadcastData, CommandTags
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SerialCommand:
+    """Container for commands sent to the Arduino via serial connection.
+
+    Stores the command data needed for eVOLVER Arduino communication.
+
+    Attributes:
+        param (str): Parameter name being controlled (e.g., "temp", "stir").
+        address (int): Arduino address for the command.
+        value (list[int]): List of values to set for the parameter.
+        tag (CommandTags): Command type tag (REQUEST, ACKNOWLEDGE, etc.).
+    """
+
     param: str
     address: int
     value: list[int]
     tag: CommandTags
 
 
+@dataclass
+class EvolverCommand:
+    """Container for eVOLVER commands received from clients.
+
+    Validates and normalizes commands to be sent to the Arduino.
+
+    Attributes:
+        param (str): Parameter name being controlled (e.g., "temp", "stir").
+        address (int): Arduino address for the command.
+        value (list[int]): List of values to set for the parameter.
+        immediate (bool): Whether the command should be executed immediately.
+        recurring (bool): Whether the command should be recurring.
+        phase (str): Phase in which the command is executed ("phase_0", etc.).
+        parameter_table (ClassVar[dict]): Class-level parameter lookup table.
+    """
+
+    param: str
+    address: int
+    value: list[int]
+    immediate: bool
+    recurring: bool
+    phase: str
+    parameter_table: ClassVar[dict] = field(init=False)
+
+    @classmethod
+    def extract_parameter_info(cls, parameter_config: dict):
+        """Extract parameter information from configuration.
+
+        Processes the parameter configuration to build a lookup table
+        for parameter addresses, phases, and data lengths.
+
+        Args:
+            parameter_config (dict): The parameters section of the eVOLVER configuration.
+        """
+        cls.parameter_table: dict = {}
+        # Extract from phase_0
+        if "phase_0" in parameter_config:
+            for param, config in parameter_config["phase_0"].items():
+                if "address" in config:
+                    cls.parameter_table[param] = (config["address"], "phase_0", config["data_length"])
+
+        # Extract from phase_1
+        if "phase_1" in parameter_config:
+            for param, config in parameter_config["phase_1"].items():
+                if "address" in config:
+                    cls.parameter_table[param] = (config["address"], "phase_1", config["data_length"])
+
+        # Extract from phase_2 if it exists
+        if "phase_2" in parameter_config:
+            for param, config in parameter_config["phase_2"].items():
+                if "address" in config:
+                    cls.parameter_table[param] = (config["address"], "phase_2", config["data_length"])
+
+    @classmethod
+    def create(cls, command: dict):
+        """Create an EvolverCommand from a client command dictionary.
+
+        Validates the command data and creates an EvolverCommand instance.
+
+        Args:
+            command (dict): Command dictionary from the client.
+                Example: {"param": "temp", "value": [30, 30, 30, 30], "immediate": True, "recurring": True}
+
+        Returns:
+            EvolverCommand: A validated EvolverCommand instance.
+
+        Raises:
+            EvolverError: If the command is invalid.
+
+        Examples:
+            ```
+            command = {"param": "temp", "value": [30, 30, 30, 30], "immediate": True, "recurring": True}
+            evolver_command = EvolverCommand.create(command)
+            ```
+        """
+        if command["param"] not in cls.parameter_table:
+            raise EvolverError(f"Not registered parameter in recently received command: {command}")
+
+        if command["value"] != len(cls.parameter_table[command["param"]][2]):
+            raise EvolverError(f"Incorrect length of values in recently received command: {command}")
+
+        if not all(isinstance(value, int) for value in command["value"]):
+            raise EvolverError(f"Non-integer found in recently received command: {command}")
+
+        if not all(value >= 0 for value in command["value"]):
+            raise EvolverError(f"Negative value detected in recently received command: {command}")
+
+        return cls(
+            param=command["param"],
+            address=cls.parameter_table[command["param"]][0],
+            value=command["value"],
+            immediate=command["immediate"],
+            recurring=command["recurring"],
+            phase=cls.parameter_table[command["param"]][1],
+        )
+
+
 class EvolverServerNamespace(socketio.AsyncNamespace):
+    """Server namespace for eVOLVER hardware control.
+
+    Handles communication with the eVOLVER hardware via serial connection
+    and processes client requests for control and data acquisition.
+
+    Attributes:
+        evolver_conf (dict): Configuration for eVOLVER.
+        evolver_conf_path (str): Path to the eVOLVER configuration file.
+        phase (int): Current broadcast phase (0, 1, or 2).
+        command_queue (list[SerialCommand]): Queue of commands to be sent to the Arduino.
+        running_immediate (bool): Whether an immediate command is being processed.
+        running_broadcast (bool): Whether a broadcast is in progress.
+        calibration_directory (str): Directory for calibration data.
+        serial_connection (serial.Serial): Serial connection to the Arduino.
+    """
+
     def __init__(
         self,
         evolver_conf: dict,
@@ -38,27 +164,32 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         self.running_immediate: bool = False
         self.running_broadcast: bool = False
 
-        self.calibrations_directory: str = evolver_conf["calibrations_directory"]
+        self.calibration_directory: str = evolver_conf["calibration_directory"]
         self.serial_connection: serial.Serial = serial.Serial(
             port=self.evolver_conf["serial_port"],
             baudrate=self.evolver_conf["serial_baudrate"],
             timeout=self.evolver_conf["serial_timeout"],
         )
-        self.address_table: dict[str, int] = {}
-        self.extract_parameter_addresses()
+        EvolverCommand.extract_parameter_info(self.evolver_conf["parameters"])
+
+        os.makedirs(self.calibration_directory, exist_ok=True)
+        temp_dir = os.path.join(self.calibration_directory, "temp")
+        od_dir = os.path.join(self.calibration_directory, "od")
+        os.makedirs(temp_dir, exist_ok=True)
+        os.makedirs(od_dir, exist_ok=True)
+
+        logger.info("eVOLVER namespace initialized")
 
     async def on_connect(self, sid) -> None:
-        """Handles client connection to the server's eVOLVER namespace.
+        """Handle client connection to the server's eVOLVER namespace.
 
         Args:
             sid (str): Session ID of the connecting client.
-            environ (dict): Environment information about the connection.
         """
-
         logger.info("Client connected to the eVOLVER namespace")
 
     async def on_disconnect(self, sid):
-        """Handles client disconnection from the eVOLVER namespace.
+        """Handle client disconnection from the eVOLVER namespace.
 
         Args:
             sid (str): Session ID of the disconnecting client.
@@ -66,43 +197,34 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         logger.info("Client disconnected from the eVOLVER namespace")
 
     async def on_command(self, sid, command: dict):
-        """Processes eVOLVER commands received from clients to control SmartStation parameters.
+        """Process eVOLVER commands received from clients.
 
         Validates commands, updates configurations, and either queues them for
         later processing or executes them immediately based on the immediate flag.
 
         Args:
             sid (str): Session ID of the client.
-            evolver_command (dict): Command data including parameter, value, and flags.
-                Example: {"param": "temp", "value": [30, 30, 30, 30], "immediate": True}
+            command (dict): Command data including parameter, value, and flags.
+                Example: {"param": "temp", "value": [30, 30, 30, 30], "immediate": True, "recurring": True}
 
         Raises:
             EvolverError: If the command doesn't match a valid parameter.
+
+        Examples:
+            Called by client via:
+            ```
+            client.evolver.send_command("temp", [30, 30, 30, 30], True, True)
+            ```
         """
         logger.info(f"Received the client command: {command}")
         try:
-            evolver_command = EvolverCommand(**command)
-
-            # Get the phase info for the parameter command
-            command_phase = ""
-            for phase in self.evolver_conf["parameters"]:
-                exit = False
-                for parameter in self.evolver_conf["parameters"][phase]:
-                    if parameter == evolver_command.param:
-                        exit = True
-                        command_phase = phase
-                        break
-                if exit:
-                    break
-
-            if command_phase == "":
-                raise EvolverError("Could not find valid phase data for the submitted parameter")
+            evolver_command = EvolverCommand.create(command)
 
             # Initialize a new SerialCommand with the data received if its an immediate command
             if evolver_command.immediate:
                 new_command = SerialCommand(
                     param=evolver_command.param,
-                    address=self.evolver_conf["parameters"][command_phase][evolver_command.param]["address"],
+                    address=evolver_command.address,
                     value=evolver_command.value,
                     tag=CommandTags.REQUEST,
                 )
@@ -117,56 +239,25 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
                     self.running_immediate = False
 
             # Update the parameter information in active conf dictionary and conf file
-            self.evolver_conf["parameters"][command_phase][evolver_command.param]["recurring"] = evolver_command.recurring
-            if self.evolver_conf["parameters"][command_phase][evolver_command.param]["value"] is not None:
-                self.evolver_conf["parameters"][command_phase][evolver_command.param]["value"] = evolver_command.value
+            self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["recurring"] = evolver_command.recurring
+            if self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] is not None:
+                self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] = evolver_command.value
             self.save_conf()
-        except TypeError as e:
+            logger.info(f"Finished processed received EvolverCommand: {evolver_command}")
+        except EvolverError as e:
             logger.warning(f"Error processing received EvolverCommand: {e}")
 
-    async def on_request_calibration(self, sid, parameter: str):
-        """Loads and sends calibration data for the requested parameter.
-
-        Finds the most recent calibration file for the requested parameter and
-        sends it back to the requesting client.
-
-        Args:
-            sid (str): Session ID of the client.
-            data (dict): Request containing the parameter to retrieve calibration for.
-                Example: {"param": "od"}
-        """
-        # make sure requested parameter has a valid calibration
-        if parameter in self.evolver_conf["valid_calibrations"]:
-            # find the calibration file for the requested parameter
-            calibration_dir = self.calibrations_directory
-            calibration_files = [filename for filename in os.listdir(calibration_dir) if parameter in filename]
-
-            if not calibration_files:
-                await self.emit("get_calibration", {"parameter": parameter, "calibration": ""}, to=sid)
-                logger.error(f"No calibration file found for parameter: {parameter}")
-
-            # grab the most recently created calibration file in the directory for that parameter
-            calibration_filename = os.path.join(calibration_dir, sorted(calibration_files)[-1])
-            calibration_data: dict = {}
-            with open(calibration_filename, "r") as file:
-                # Load the JSON data from the file
-                calibration_data = json.load(file)
-
-            # Send the calibration data back to the client
-            await self.emit("get_calibration", {"parameter": parameter, "calibration": calibration_data}, to=sid)
-            logger.info(f"Calibration data sent to requesting client : {parameter}")
-        else:
-            # Parameter doesn't have valid calibration
-            await self.emit("get_calibration", {"parameter": parameter, "calibration": "error"}, to=sid)
-            logger.warning(f"Invalid parameter received during calibration data request: {parameter}")
-
     async def on_request_status(self, sid):
-        """Responds with the current HTeVOLVER namespace status.
-
-        Emits the current status to the requesting client.
+        """Respond with the current eVOLVER status.
 
         Args:
             sid (str): Session ID of the requesting client.
+
+        Examples:
+            Called by client via:
+            ```
+            client.evolver.request_status()
+            ```
         """
         status = {
             "phase": self.phase,
@@ -178,37 +269,80 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         logger.info("Request for current HTeVOLVER status processed.")
 
     async def on_request_conf(self, sid):
-        """Responds with the current HTeVOLVER namespace configuration.
+        """Respond with the current eVOLVER configuration.
 
         Args:
             sid (str): Session ID of the requesting client.
+
+        Examples:
+            Called by client via:
+            ```
+            client.evolver.request_conf()
+            ```
         """
         await self.emit("get_conf", self.evolver_conf, to=sid)
         logger.info("Request for current HTeVOLVER configuration processed")
 
-    def extract_parameter_addresses(self):
-        """Extract parameter:address mappings from evolver_conf"""
+    async def on_request_calibration(self, sid, data):
+        """Send calibration data to the client.
 
-        # Extract from phase_0
-        if "phase_0" in self.evolver_conf["parameters"]:
-            for param, config in self.evolver_conf["parameters"]["phase_0"].items():
-                if "address" in config:
-                    self.address_table[param] = config["address"]
+        Loads and sends the specified calibration file to the client.
 
-        # Extract from phase_1
-        if "phase_1" in self.evolver_conf["parameters"]:
-            for param, config in self.evolver_conf["parameters"]["phase_1"].items():
-                if "address" in config:
-                    self.address_table[param] = config["address"]
+        Args:
+            sid (str): Session ID of the client.
+            data (dict): Dictionary with parameter, station_id, and filename.
+                Example: {"parameter": "temp", "station_id": 0, "filename": "calibration_data_temp_2023-01-01.json"}
 
-        # Extract from phase_2 if it exists
-        if "phase_2" in self.evolver_conf["parameters"] and self.evolver_conf["parameters"]["phase_2"]:
-            for param, config in self.evolver_conf["parameters"]["phase_2"].items():
-                if "address" in config:
-                    self.address_table[param] = config["address"]
+        Examples:
+            Called by client via:
+            ```
+            client.evolver.request_calibration("temp", 0, "calibration_data_temp_2023-01-01.json")
+            ```
+        """
+        try:
+            local_filename = os.path.join(self.calibration_directory, data["parameter"], data["filename"])
+            calibration_data = CalibrationData.from_file(local_filename)
+            await self.emit("get_calibration", sid, {"calibration_data": calibration_data, "station_id": data["station_id"]})
+            logger.info("Finished loading calibration data")
+        except FileNotFoundError:
+            logger.warning(f"Error loading calibration file: {data['filename']}")
+            await self.emit("get_calibration", sid, {"calibration_data": {}, "station_id": data["station_id"]})
+
+    async def on_receive_calibration(self, sid, new_calibration_data):
+        """Save calibration data received from a client.
+
+        Stores new calibration data received from a client to the appropriate file.
+
+        Args:
+            sid (str): Session ID of the client.
+            new_calibration_data (dict): Dictionary with parameter, data, and timestamp.
+                Example: {"parameter": "temp", "data": {...}, "timestamp": "2023-01-01_12-34-56"}
+
+        Examples:
+            Called by client via:
+            ```
+            client.evolver.send_calibration("temp", calibration_data, "2023-01-01_12-34-56")
+            ```
+        """
+        timestamp = new_calibration_data["timestamp"]
+        parameter = new_calibration_data["parameter"]
+
+        try:
+            filename = os.path.join(self.calibration_directory, parameter, f"calibration_data_{parameter}_{timestamp}.json")
+            with open(filename, "w") as f:
+                json.dump(new_calibration_data["data"], f, indent=4)
+            logger.info(f"Calibration successfully saved to {filename}")
+        except Exception as e:
+            logger.warning(f"Error saving calibration data: {e}. Saving a string-formatted backup")
+            filename = os.path.join(
+                self.calibration_directory, parameter, f"calibration_data_{parameter}_{timestamp}_STRING-BACKUP.txt"
+            )
+            with open(filename, "w") as f:
+                new_calibration_data_str = str(new_calibration_data)
+                f.write(new_calibration_data_str)
 
     def load_conf(self):
-        """Loads in the HTeVOLVER configuration from memory.
+        """Load the eVOLVER configuration from disk.
 
         Reads the current configuration from the file system to ensure operations
         use the most up-to-date settings.
@@ -232,7 +366,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         logger.debug(f"Following configuration saved to memory:{self.evolver_conf}")
 
     async def run_commands(self):
-        """Executes all commands in the command queue.
+        """Execute all commands in the command queue.
 
         Processes each command in the queue by sending it to the Arduino,
         collecting returned data if available.
@@ -260,13 +394,23 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         return data
 
     def cobs_encode(self, data: bytearray) -> bytearray:
-        """Encodes data using Consistent Overhead Byte Stuffing (COBS).
+        """Encode data using Consistent Overhead Byte Stuffing (COBS).
+
+        COBS encoding ensures that the encoded data contains no zero bytes except
+        for a trailing delimiter, which is useful for framing serial communications.
 
         Args:
-            data: The data to encode
+            data (bytearray): The data to encode.
 
         Returns:
-            bytearray: COBS encoded data with a trailing zero byte
+            bytearray: COBS encoded data with a trailing zero byte.
+
+        Examples:
+            ```
+            original_data = bytearray([1, 0, 2, 3, 0, 4])
+            encoded_data = cobs_encode(original_data)
+            # encoded_data will be bytearray([2, 1, 3, 2, 3, 2, 4, 0])
+            ```
         """
 
         encoded_packet = bytearray()
@@ -297,13 +441,22 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         return encoded_packet
 
     def cobs_decode(self, data: bytearray | bytes) -> bytearray:
-        """Decodes COBS-encoded data.
+        """Decode COBS-encoded data.
+
+        Reverses the COBS encoding process to recover the original data.
 
         Args:
-            data: COBS-encoded data (without the trailing zero byte)
+            data (bytearray|bytes): COBS-encoded data (without the trailing zero byte).
 
         Returns:
-            bytearray: The decoded data
+            bytearray: The decoded data.
+
+        Examples:
+            ```
+            encoded_data = bytearray([2, 1, 3, 2, 3, 2, 4, 0])
+            decoded_data = cobs_decode(encoded_data)
+            # decoded_data will be bytearray([1, 0, 2, 3, 0, 4])
+            ```
         """
         decoded_packet = bytearray()
         i = 0
@@ -325,7 +478,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         return decoded_packet
 
     def build_packet(self, command: SerialCommand) -> bytearray:
-        """Builds a packet for serial communication with the Arduino.
+        """Build a packet for serial communication with the Arduino.
 
         Constructs a properly formatted packet with address, data length,
         command type, data payload, and checksum, then applies COBS encoding.
@@ -335,6 +488,17 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
 
         Returns:
             bytearray: The COBS-encoded packet ready for transmission.
+
+        Examples:
+            ```
+            command = SerialCommand(
+                param="temp",
+                address=0x01,
+                value=[30, 30, 30, 30],
+                tag=CommandTags.REQUEST
+            )
+            packet = build_packet(command)
+            ```
         """
         packet = bytearray()
         # Get address from command if it exists, otherwise fetch from config
@@ -366,7 +530,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         return encoded_packet
 
     def serial_communication(self, command: SerialCommand) -> list[int]:
-        """Handles the full serial communication cycle with the Arduino.
+        """Handle the full serial communication cycle with the Arduino.
 
         Sends the command packet to the Arduino, reads and validates the response,
         sends an acknowledgment, and extracts any returned sensor data.
@@ -375,10 +539,19 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             command (SerialCommand): The command to send.
 
         Returns:
-            list[int] or None: Data returned from the Arduino, if any.
+            list[int]: Data returned from the Arduino, if any.
 
         Raises:
             EvolverSerialError: If there's an error in communication or validation.
+
+        Examples:
+            ```
+            command = SerialCommand(param="temp", address=0x01, value=[30, 30, 30, 30], tag=CommandTags.REQUEST)
+            try:
+                response_data = serial_communication(command)
+            except EvolverSerialError as e:
+                print(f"Communication error: {e}")
+            ```
         """
         self.serial_connection.reset_input_buffer()
         self.serial_connection.reset_output_buffer()
@@ -441,7 +614,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         return packet_response_data
 
     async def broadcast(self, phase: int):
-        """Broadcasts commands and data for the specified phase.
+        """Broadcast commands and data for the specified phase.
 
         Executes the broadcast cycle for a given phase, including sending
         phase state to arduinos, processing recurring commands, and
@@ -452,6 +625,16 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
 
         Returns:
             bool: True if broadcast completed successfully, False otherwise.
+
+        Examples:
+            ```
+            # Execute phase 0 broadcast
+            result = await broadcast(0)
+            if result:
+                print("Broadcast completed successfully")
+            else:
+                print("Broadcast failed or was interrupted")
+            ```
         """
         # if currently running IMMEDIATE commands exit broadcast function, otherwise continue
         if self.running_immediate:

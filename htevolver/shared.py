@@ -48,16 +48,6 @@ class BroadcastData:
     config: str = field(default="")
 
 
-#### DATA STORAGE CLASSES ####
-@dataclass
-class EvolverCommand:
-    param: str
-    address: int
-    value: list[int]
-    immediate: bool
-    recurring: bool
-
-
 #### STATUS MANAGEMENT CLASSES ####
 @dataclass
 class HTEvolverStatus:

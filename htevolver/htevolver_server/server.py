@@ -30,7 +30,14 @@ logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 
 async def shutdown(app):
-    """Cancel the broadcast task when shutting down"""
+    """Cancel the broadcast task when shutting down.
+
+    Gracefully cancels and waits for the broadcast task to complete when
+    the application is shutting down.
+
+    Args:
+        app (Application): The AIOHTTP web application instance.
+    """
     if app.get("broadcast_task"):
         app["broadcast_task"].cancel()
         try:
@@ -40,8 +47,23 @@ async def shutdown(app):
 
 
 async def broadcast_loop(app: Application):
-    """Background task for periodic broadcasting"""
+    """Background task for periodic broadcasting of system status.
 
+    Runs in the background to periodically broadcast the system state to all
+    connected clients. Coordinates broadcasts between the robotics and eVOLVER
+    namespaces, ensuring they don't interfere with each other or with immediate
+    command execution.
+
+    Args:
+        app (Application): The AIOHTTP web application instance containing
+            the namespace objects and broadcast timing configuration.
+
+    Examples:
+        This function is typically started as a background task:
+        ```
+        app["broadcast_task"] = asyncio.create_task(broadcast_loop(app))
+        ```
+    """
     last_time = 0.0
     while True:
         current_time = time.time()
@@ -82,7 +104,21 @@ async def broadcast_loop(app: Application):
 
 
 async def background_tasks(app):
-    """Start background tasks after app startup"""
+    """Start background tasks after app startup and clean them up on shutdown.
+
+    Used as a cleanup context for the web application. Creates and manages
+    the broadcast task lifecycle, ensuring it's properly created on startup
+    and cleaned up on shutdown.
+
+    Args:
+        app (Application): The AIOHTTP web application instance.
+
+    Examples:
+        This function is typically added to the application's cleanup context:
+        ```
+        app.cleanup_ctx.append(background_tasks)
+        ```
+    """
     app["broadcast_task"] = asyncio.create_task(broadcast_loop(app))
     logger.debug("starting broadcast task")
 
@@ -94,11 +130,25 @@ async def background_tasks(app):
         await app["broadcast_task"]
 
 
-def init():
-    """Initialize the web application with all required components"""
+def init() -> web.Application:
+    """Initialize the web application with all required components.
+
+    Creates and configures the AIOHTTP web application, Socket.IO server,
+    namespace handlers, and loads configuration files. Sets up logging
+    and background tasks.
+
+    Returns:
+        web.Application: The initialized AIOHTTP web application ready to be run.
+
+    Examples:
+        ```
+        app = init()
+        web.run_app(app, port=app["port"])
+        ```
+    """
     # Load configs
-    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", EVOLVER_CONF_FILENAME))
-    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/evolver", ROBOTICS_CONF_FILENAME))
+    evolver_conf_path = os.path.realpath(os.path.join("/home/pi/htevolver", EVOLVER_CONF_FILENAME))
+    robotics_conf_path = os.path.realpath(os.path.join("/home/pi/htevolver", ROBOTICS_CONF_FILENAME))
     evolver_conf = {}
     robotics_conf = {}
     with open(evolver_conf_path, "r") as ymlfile:
@@ -122,7 +172,6 @@ def init():
     sio.register_namespace(app["evolver_namespace"])
     sio.register_namespace(app["robotics_namespace"])
 
-    # broadcast_task = web.AppKey("broadcast_task", asyncio.Task[None])
     app.cleanup_ctx.append(background_tasks)
 
     return app

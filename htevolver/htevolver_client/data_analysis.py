@@ -1,76 +1,207 @@
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
-from evolver_namespace_client import EvolverClientNamespace
 
 logger = logging.getLogger(__name__)
 
 
-def collect_voltage_readings(
-    htevolver_client: EvolverClientNamespace,
-    container_list: list[int],
-    sensor_type: str,
-    station_id=None,
-    num_readings=3,
-):
-    """Collect voltage readings from sensors.
-
-    Args:
-        htevolver_client: The HTEvolverNamespace instance
-        container_list: List of stations or vials to collect readings from
-        sensor_type: Either 'temp' or 'od' to specify the sensor type
-        station: Required for 'od' sensor_type to specify the station ID
-        num_readings: Number of readings to take for each container
-
-    Returns:
-        Dictionary mapping container IDs to voltage reading arrays
-    """
-    voltage_readings = {container_id: np.zeros(num_readings) for container_id in container_list}
-
-    print(f"{sensor_type.capitalize()} reading starting, do not move vials or exit...")
-    current_counter = htevolver_client.broadcast_counter
-    read_num = 0
-
-    while read_num < num_readings:
-        if current_counter != htevolver_client.broadcast_counter:
-            print(f"New broadcast detected, storing voltage values for read {read_num}")
-
-            if sensor_type == "temp":
-                for station_id in container_list:
-                    voltage_readings[station_id][read_num] = htevolver_client.stations[station_id].temp[-1].voltage
-            elif sensor_type == "od":
-                if station_id is None:
-                    raise ValueError("Station ID must be provided for OD readings")
-                for vial_id in container_list:
-                    voltage_readings[vial_id][read_num] = htevolver_client.stations[station_id].od[-1][vial_id].voltage
-
-            current_counter = htevolver_client.broadcast_counter
-            read_num += 1
-
-    return voltage_readings
-
-
 @dataclass
 class CalibrationData:
+    """Container for calibration data used in HT-eVOLVER.
+
+    Stores and processes voltage readings, standards, calibration coefficients,
+    and standard deviations for OD and temperature calibrations.
+
+    Attributes:
+        voltage (np.ndarray): Array of raw voltage/ADC readings.
+        standards (np.ndarray): Array of reference measurement values.
+        coefficients (np.ndarray): Curve fit coefficients for the calibration.
+        standard_deviation (np.ndarray): Array of standard deviations for voltage readings.
+    """
+
     voltage: np.ndarray
     standards: np.ndarray
     coefficients: np.ndarray
     standard_deviation: np.ndarray
 
-    def sigmoid(self, x: int | float, a: float, b: float, c: float, d: float) -> float:
+    @staticmethod
+    def sigmoid(x: int | float, a: float, b: float, c: float, d: float) -> float:
+        """Apply a sigmoid transformation using the four-parameter logistic function.
+
+        Used for OD calibration to fit nonlinear optical density curves.
+
+        Args:
+            x (int|float): Input value to transform.
+            a (float): Lower asymptote parameter.
+            b (float): Upper asymptote parameter.
+            c (float): Inflection point parameter.
+            d (float): Slope parameter.
+
+        Returns:
+            float: Transformed value following the sigmoid curve.
+
+        Examples:
+            >>> CalibrationData.sigmoid(0.5, 100, 1000, 0.4, 10)
+            550.0
+        """
         return a + (b - a) / (1 + (10 ** ((c - x) * d)))
 
-    def linear(self, x: int | float, a: float, b: float) -> float:
+    @staticmethod
+    def linear(x: int | float, a: float, b: float) -> float:
+        """Apply a linear transformation.
+
+        Used primarily for temperature calibration to convert voltage to temperature.
+
+        Args:
+            x (int|float): Input value to transform.
+            a (float): Slope parameter.
+            b (float): Y-intercept parameter.
+
+        Returns:
+            float: Linearly transformed value.
+
+        Examples:
+            >>> CalibrationData.linear(1500, -0.02, 70)
+            40.0
+        """
         return x * a + b
+
+    @staticmethod
+    def to_json(data: dict):
+        """Convert calibration data to JSON-serializable format.
+
+        Recursively converts numpy arrays and nested structures to standard Python types.
+
+        Args:
+            data (dict): Data structure to convert, can contain numpy arrays, dictionaries, lists, etc.
+
+        Returns:
+            dict: JSON-serializable version of the input data.
+
+        Examples:
+            >>> data = {0: CalibrationData(np.array([1, 2]), np.array([0.1, 0.2]),
+            ...                           np.array([0.01, 0.01]), np.array([1.5, 3.0]))}
+            >>> CalibrationData.to_json(data)
+            {0: {'voltage': [1, 2], 'standards': [0.1, 0.2],
+                'standard_deviation': [0.01, 0.01], 'coefficients': [1.5, 3.0]}}
+        """
+        if isinstance(data, np.ndarray):
+            return data.tolist()
+        elif isinstance(data, dict):
+            return {k: CalibrationData.to_json(v) for k, v in data.items()}
+        elif isinstance(data, list) or isinstance(data, tuple):
+            return [CalibrationData.to_json(item) for item in data]
+        else:
+            return data
+
+    @classmethod
+    def from_dict(cls, deserialize_data: dict):
+        """Create calibration data objects from a dictionary structure.
+
+        Converts JSON-formatted data back to CalibrationData objects.
+        Handles both single-level (station: CalibrationData) and
+        nested (station: {vial: CalibrationData}) formats.
+
+        Args:
+            deserialize_data (dict): Dictionary containing calibration data.
+
+        Returns:
+            dict: Dictionary of CalibrationData objects organized by station (and vial if applicable).
+
+        Raises:
+            StopIteration: If deserialize_data is empty.
+            KeyError: If the expected fields are missing in the input data.
+
+        Examples:
+            >>> data = {
+            ...     "0": {
+            ...         "voltage": [1500, 1700, 1900],
+            ...         "standards": [35.0, 30.0, 25.0],
+            ...         "standard_deviation": [2.0, 1.5, 1.0],
+            ...         "coefficients": [-0.02, 65.0]
+            ...     }
+            ... }
+            >>> cal_data = CalibrationData.from_dict(data)
+            >>> type(cal_data[0])
+            <class '__main__.CalibrationData'>
+        """
+        calibration_data = {}
+
+        first_station = next(iter(deserialize_data.values()))
+        is_format_nested = isinstance(first_station, dict) and "voltage" not in first_station
+
+        for key, value in deserialize_data.items():
+            station = int(key)
+
+            if is_format_nested:
+                # Format: {station: {vial: CalibrationData}}
+                calibration_data[station] = {}
+                for vial_key, vial_data in value.items():
+                    vial = int(vial_key)
+                    calibration_data[station][vial] = cls(
+                        voltage=np.array(vial_data["voltage"]),
+                        standards=np.array(vial_data["standards"]),
+                        standard_deviation=np.array(vial_data["standard_deviation"]),
+                        coefficients=np.array(vial_data["coefficients"]),
+                    )
+            else:
+                # Format: {station: CalibrationData}
+                calibration_data[station] = cls(
+                    voltage=np.array(value["voltage"]),
+                    standards=np.array(value["standards"]),
+                    standard_deviation=np.array(value["standard_deviation"]),
+                    coefficients=np.array(value["coefficients"]),
+                )
+
+        return calibration_data
+
+    @staticmethod
+    def from_file(filename: str):
+        """Load calibration data from a JSON file.
+
+        Args:
+            filename (str): Path to the calibration data JSON file.
+
+        Returns:
+            dict: Dictionary of CalibrationData objects organized by station (and vial if applicable).
+
+        Raises:
+            FileNotFoundError: If the specified file does not exist.
+            json.JSONDecodeError: If the file contains invalid JSON.
+
+        Examples:
+            >>> cal_data = CalibrationData.from_file("/path/to/calibration_data_temp_2025-04-13.json")
+            >>> cal_data[0].coefficients
+            array([-38.55302223,  2993.94651471])
+        """
+        with open(filename, "r") as f:
+            deserialize_data = json.load(f)
+        return CalibrationData.from_dict(deserialize_data)
 
 
 @dataclass
 class GraphCalibration:
+    """Utility for visualizing calibration data and fitted curves.
+
+    Creates calibration graphs with measured points, error bars, and fitted lines.
+
+    Attributes:
+        container_type (str): Type of container being calibrated (e.g., "Vial", "Smart Station").
+        title (str): Title for the calibration plot.
+        units (str): Units for the calibration (e.g., "OD600", "Celsius").
+        row (int): Number of rows in the subplot grid.
+        column (int): Number of columns in the subplot grid.
+        stop (int|float): Maximum value for the x-axis of the plot.
+        start (int): Minimum value for the x-axis of the plot (default: 0).
+        sample_num (int): Number of points to sample for the fitted curve (default: 500).
+    """
+
     container_type: str
-    param: str
+    title: str
     units: str
     row: int
     column: int
@@ -78,10 +209,33 @@ class GraphCalibration:
     start: int = field(default=0)
     sample_num: int = field(default=500)
 
-    def graph(self, func, calibration_data: dict[int, CalibrationData]):
+    def graph(self, func: Callable, calibration_data: dict[int, CalibrationData]):
+        """Generate calibration graphs for the provided data.
+
+        Creates a grid of subplots, each showing a calibration curve for one object
+        (station or vial), with measured points, error bars, and the fitted curve.
+
+        Args:
+            func (Callable): Function to use for curve fitting (e.g., CalibrationData.sigmoid
+                or CalibrationData.linear).
+            calibration_data (dict[int, CalibrationData]): Dictionary mapping object IDs to
+                their corresponding CalibrationData.
+
+        Examples:
+            >>> grapher = GraphCalibration(
+            ...     container_type="Smart Station",
+            ...     title="Temperature",
+            ...     units="Celsius",
+            ...     row=2,
+            ...     column=2,
+            ...     stop=3000,
+            ...     start=1000
+            ... )
+            >>> grapher.graph(CalibrationData.linear, calibration_data)
+        """
         linear_space = np.linspace(self.start, self.stop, self.sample_num)
         fig, axs = plt.subplots(self.row, self.column)
-        fig.suptitle(f"{self.param} Calibration Fits for HT-eVOLVER", fontsize=15)
+        fig.suptitle(f"{self.title} Calibration Fits for HT-eVOLVER", fontsize=15)
 
         row = 0
         col = 0
@@ -105,56 +259,3 @@ class GraphCalibration:
                 row += 1
 
         plt.show()
-
-
-# Convert numpy arrays to lists for JSON serialization
-def serialize_data(data):
-    if isinstance(data, np.ndarray):
-        return data.tolist()
-    elif isinstance(data, dict):
-        return {k: serialize_data(v) for k, v in data.items()}
-    elif isinstance(data, list) or isinstance(data, tuple):
-        return [serialize_data(item) for item in data]
-    else:
-        return data
-
-
-def load_data(filename: str) -> dict[int, CalibrationData] | dict[int, dict[int, CalibrationData]]:
-    try:
-        with open(filename, "r") as f:
-            deserialize_data = json.load(f)
-
-        # Convert data back to numpy arrays
-        calibration_data = {}
-
-        # Check the first station to determine the data format
-        first_station = next(iter(deserialize_data.values()))
-        is_format_nested = isinstance(first_station, dict) and "voltage" not in first_station
-
-        for key, value in deserialize_data.items():
-            station = int(key)
-
-            if is_format_nested:
-                # Format: {station: {vial: CalibrationData}}
-                calibration_data[station] = {}
-                for vial_key, vial_data in value.items():
-                    vial = int(vial_key)
-                    calibration_data[station][vial] = CalibrationData(
-                        voltage=np.array(vial_data["voltage"]),
-                        standards=np.array(vial_data["standards"]),
-                        standard_deviation=np.array(vial_data["standard_deviation"]),
-                        coefficients=np.array(vial_data["coefficients"]),
-                    )
-            else:
-                # Format: {station: CalibrationData}
-                calibration_data[station] = CalibrationData(
-                    voltage=np.array(value["voltage"]),
-                    standards=np.array(value["standards"]),
-                    standard_deviation=np.array(value["standard_deviation"]),
-                    coefficients=np.array(value["coefficients"]),
-                )
-
-        return calibration_data
-    except Exception as e:
-        print(f"Error loading calibration data: {e}")
-        return {}

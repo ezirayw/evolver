@@ -1,7 +1,6 @@
 ---
 xArm:
   ip: "192.168.1.200"
-  connect: False
   roll: 180
   pitch: 0
   yaw: 0
@@ -49,9 +48,8 @@ pipette_head:
   serial_port: ""
   pumps:
     0:
-      connect: False
       primary: media
-      type: XCaliburD
+      type: dummy
       head_port: 1
       ports:
         2:
@@ -63,9 +61,8 @@ pipette_head:
           primed: False
           volume: 0
     1:
-      connect: False
       primary: media
-      type: XCaliburD
+      type: dummy
       ports:
         2:
           fluid: media
@@ -76,9 +73,8 @@ pipette_head:
           primed: False
           volume: 0
     2:
-      connect: False
       primary: media
-      type: XCaliburD
+      type: dummy
       ports:
         2:
           fluid: media
@@ -89,9 +85,8 @@ pipette_head:
           primed: False
           volume: 0
     3:
-      connect: False
       primary: media
-      type: XCaliburD
+      type: dummy
       ports:
         2:
           fluid: media
@@ -105,6 +100,10 @@ pipette_head:
 smart_stations:
   0:
     connect: True
+    wash_location:
+      x: 72
+      y: -29
+    wash_depth: 0
     plane_out:
       vial0_x: 79
       vial0_y: -471
@@ -119,14 +118,26 @@ smart_stations:
       z: 429.5
   1:
     connect: False
+    wash_location:
+      x: 72
+      y: -29
+    wash_depth: 0
     plane_out: null
     plane_in: null
   2:
     connect: False
+    wash_location:
+      x: 72
+      y: -29
+    wash_depth: 0
     plane_out: null
     plane_in: null
   3:
     connect: False
+    wash_location:
+      x: 72
+      y: -29
+    wash_depth: 0
     plane_out: null
     plane_in: null
 
