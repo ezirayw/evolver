@@ -164,7 +164,7 @@ def init() -> web.Application:
     app["port"] = evolver_conf["port"]
     app["broadcast_timing"] = evolver_conf["broadcast_timing"]
 
-    sio = socketio.AsyncServer(namespaces=["/evolver", "/robotics"])
+    sio = socketio.AsyncServer(always_connect=True)
     sio.attach(app)
 
     app["evolver_namespace"] = EvolverServerNamespace(evolver_conf, evolver_conf_path)

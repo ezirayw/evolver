@@ -32,11 +32,11 @@ class HTEvolverClient:
     def __init__(
         self,
         ip: str,
+        port: int,
         save: bool,
         directory: str = "/home/pi/htevolver/experiments",
         calibration_directory: str = "/home/pi/htevolver/calibration",
         station_ids: list[int] = [],
-        port: int = 8081,
         data_buffer_size: int = 10,
     ):
         self.ip = ip
@@ -85,8 +85,6 @@ class HTEvolverClient:
             >>> client.connect()
             >>> # Now the client is connected to the server
         """
-        self.connected = True
-
         self.robotics.request_robotics_status()
         self.robotics.request_robotics_conf()
         self.robotics.connect_xArm()
@@ -104,15 +102,10 @@ class HTEvolverClient:
             >>> client.disconnect()
             >>> # Connection is now closed
         """
-        if self.connected:
-            try:
-                self.robotics.disconnect_xArm()
-                self.robotics.disable_pumps()
-                self.sio.disconnect()
-                self.connected = False
-                logger.info("Disconnected from the HTeVOLVER server")
-            except Exception as e:
-                logger.error(f"Error during disconnection: {e}")
+        self.robotics.disconnect_xArm()
+        self.robotics.disable_pumps()
+        self.sio.disconnect()
+        logger.info("Disconnected from the HTeVOLVER server")
         self.sio.disconnect()
 
     def set_temp_calibration(self, station_id: int, filename: str):

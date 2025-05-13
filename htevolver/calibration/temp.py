@@ -294,9 +294,7 @@ if __name__ == "__main__":
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
-    print(evolver_ip)
-    htevolver_client = HTEvolverClient(evolver_ip, False, station_ids=station_list)
-    htevolver_client.connect()
+    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
 
     # Start data collection procedure
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
@@ -321,5 +319,3 @@ if __name__ == "__main__":
             serializable_data_str = str(serializable_data)
             f.write(serializable_data_str)
         print(f"Calibration data (as string) saved to {filename}")
-
-    htevolver_client.disconnect()
