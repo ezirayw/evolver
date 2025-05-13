@@ -31,12 +31,12 @@ from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("calibrate_od")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
     datefmt="%Y-%m-%d %H:%M:%S",
     level=logging.INFO,
-    filename="./logs/htevolver_calibrate.log",
+    filename="/home/pi/logs/calibrate_od.log",
 )
 
 

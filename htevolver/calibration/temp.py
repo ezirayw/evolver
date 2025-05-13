@@ -29,19 +29,18 @@ import os
 import sys
 
 import numpy as np
-import socketio
 from scipy.optimize import curve_fit
 
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("calibrate_temp")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
     datefmt="%Y-%m-%d %H:%M:%S",
     level=logging.INFO,
-    filename="./logs/htevolver_calibrate.log",
+    filename="/home/pi/logs/calibrate_temp.log",
 )
 
 # Constants
@@ -295,10 +294,9 @@ if __name__ == "__main__":
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
+    print(evolver_ip)
     htevolver_client = HTEvolverClient(evolver_ip, False, station_ids=station_list)
-    socketIO_eVOLVER = socketio.Client()
-    socketIO_eVOLVER.register_namespace(htevolver_client)
-    socketIO_eVOLVER.connect(f"http://{evolver_ip}:8081")
+    htevolver_client.connect()
 
     # Start data collection procedure
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
@@ -324,4 +322,4 @@ if __name__ == "__main__":
             f.write(serializable_data_str)
         print(f"Calibration data (as string) saved to {filename}")
 
-    socketIO_eVOLVER.disconnect()
+    htevolver_client.disconnect()

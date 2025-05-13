@@ -47,9 +47,6 @@ class HTEvolverClient:
         self.port = port
         self.data_buffer_size = data_buffer_size
 
-        # Create socketio client
-        self.sio = socketio.Client()
-
         # Create data directory if it doesn't exist
         if self.save and not os.path.exists(self.directory):
             os.makedirs(self.directory)
@@ -67,11 +64,12 @@ class HTEvolverClient:
             station_ids=self.station_ids,
             data_buffer_size=self.data_buffer_size,
         )
-
         self.robotics = RoboticsClientNamespace(save=self.save, directory=self.directory, status=self.status)
-
+        self.sio = socketio.Client()
         self.sio.register_namespace(self.evolver)
         self.sio.register_namespace(self.robotics)
+        self.sio.connect(f"http://{self.ip}:{self.port}")
+        logger.info("Successfully established HT-eVOLVER client instance")
 
     def connect(self) -> None:
         """Connect to HTeVOLVER.
@@ -87,21 +85,12 @@ class HTEvolverClient:
             >>> client.connect()
             >>> # Now the client is connected to the server
         """
-        try:
-            server_address = f"http://{self.ip}:{self.port}"
-            logger.info(f"Connecting to HT Evolver server at {server_address}")
-            self.sio.connect(server_address)
-            self.connected = True
+        self.connected = True
 
-            self.robotics.request_robotics_status()
-            self.robotics.request_robotics_conf()
-            self.robotics.connect_xArm()
-            self.robotics.enable_pumps()
-
-            logger.info("Successfully connected to the HTeVOLVER server")
-        except Exception as e:
-            logger.error(f"Failed to connect to HT Evolver server: {e}")
-            raise ConnectionError(f"Could not connect to HT Evolver server: {e}")
+        self.robotics.request_robotics_status()
+        self.robotics.request_robotics_conf()
+        self.robotics.connect_xArm()
+        self.robotics.enable_pumps()
 
     def disconnect(self) -> None:
         """Disconnect from HTeVOLVER.
@@ -124,6 +113,7 @@ class HTEvolverClient:
                 logger.info("Disconnected from the HTeVOLVER server")
             except Exception as e:
                 logger.error(f"Error during disconnection: {e}")
+        self.sio.disconnect()
 
     def set_temp_calibration(self, station_id: int, filename: str):
         """Set temperature calibration for a specific station.
