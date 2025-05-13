@@ -26,7 +26,7 @@ def routine_decorator(func: Callable):
         ...     self.emit("some_routine", commands)
     """
 
-    def wrapper(self: RoboticsClientNamespace, *args, **kwargs):
+    def wrapper(self, *args, **kwargs):
         if self.check_ready():
             # run the target function
             func(self, *args, **kwargs)
