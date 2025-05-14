@@ -180,7 +180,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
 
         logger.info("eVOLVER namespace initialized")
 
-    async def on_connect(self, sid) -> None:
+    async def on_connect(self, sid, environ) -> None:
         """Handle client connection to the server's eVOLVER namespace.
 
         Args:
@@ -188,7 +188,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         """
         logger.info("Client connected to the eVOLVER namespace")
 
-    async def on_disconnect(self, sid):
+    async def on_disconnect(self, sid, reason):
         """Handle client disconnection from the eVOLVER namespace.
 
         Args:

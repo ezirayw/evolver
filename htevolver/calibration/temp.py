@@ -34,23 +34,9 @@ from scipy.optimize import curve_fit
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
-# Configure logging
-logger = logging.getLogger("calibrate_temp")
-logger.setLevel(logging.INFO)
+# Create logging instance
+logger = logging.getLogger(__name__)
 
-# Create handlers
-file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
-stream_handler = logging.StreamHandler()
-
-file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S")
-stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
-
-
-# Set formatter for both handlers
-file_handler.setFormatter(file_formatter)
-stream_handler.setFormatter(stream_formatter)
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
 
 # Constants
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
@@ -186,10 +172,8 @@ def collect_temp_data(
 
     # Room temperature step
     room_temp_step_num = int(np.floor(calibration_steps / 2))
-
     # Collect voltage readings for room temperature
     voltage_triplets = htevolver_client.get_new_temp(station_list)
-
     # Collect temperature measurements for room temperature
     temperature_measurements = collect_temperature_measurements(station_list)
 
@@ -297,6 +281,24 @@ if __name__ == "__main__":
     options, parser = get_options()
     evolver_ip = options.ip_address
 
+    logger.setLevel(logging.DEBUG)
+
+    # Create handlers
+    file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
+    file_handler.setLevel(logging.INFO)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+
+    # Set formatter for both handlers
+    file_formatter = logging.Formatter(
+        fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
+    file_handler.setFormatter(file_formatter)
+    stream_handler.setFormatter(stream_formatter)
+
     if int(options.standard_number) < STANDARD_NUM_MIN:
         logger.info(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
@@ -304,7 +306,7 @@ if __name__ == "__main__":
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
     htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
-
+    logger.info("YOOOOOOOO")
     # Start data collection procedure
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
     final_calibration_data = fit_data(collected_calibration_data, True)

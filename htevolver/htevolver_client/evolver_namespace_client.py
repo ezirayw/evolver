@@ -143,6 +143,9 @@ class SmartStationClient:
             >>> station = SmartStationClient.create(0, 100)
             >>> station.process_broadcast_data(broadcast_data)
         """
+        logger = logging.getLogger(__name__)
+        print(logger)
+        print(broadcast_data.data)
         new_temp_entry: SensorData = SensorData()
         new_temp_entry.voltage = broadcast_data.data["temp"][self.id]
         if self.temp_cal:
@@ -213,18 +216,19 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         self.stations: dict[int, SmartStationClient] = {}
         for station_id in station_ids:
             self.stations[station_id] = SmartStationClient.create(station_id, data_buffer_size)
+        self.logger = logging.getLogger(__name__)
 
     def on_connect(self):
         """Handle connection to the server."""
-        logger.info("Client connected to HTeVOVLER server via eVOLVER namespace")
+        self.logger.info("Client connected to HTeVOVLER server via eVOLVER namespace")
 
     def on_disconnect(self, *args):
         """Handle disconnection from the server."""
-        logger.info("Client disconnected from HTeVOLVER server via eVOLVER namespace")
+        self.logger.info("Client disconnected from HTeVOLVER server via eVOLVER namespace")
 
     def on_reconnect(self, *args):
         """Handle reconnection to the server."""
-        logger.info("Client reconnected to HTeVOLVER server via eVOLVER namespace")
+        self.logger.info("Client reconnected to HTeVOLVER server via eVOLVER namespace")
 
     def on_broadcast(self, data: dict):
         """Handle broadcast data from the server.
@@ -235,8 +239,9 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         Args:
             data (dict): Broadcast data received from the server.
         """
+        self.logger.info(f"eVOLVER namespace broadcast: {data}")
         broadcast_data = BroadcastData(**data)
-        logger.info(f"eVOLVER namespace broadcast: {broadcast_data}")
+        self.logger.info(f"eVOLVER namespace broadcast: {broadcast_data}")
         if broadcast_data.phase == 1:
             for station in self.stations.values():
                 station.process_broadcast_data(broadcast_data)
@@ -275,7 +280,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         Examples:
             >>> evolver_ns.request_calibration("temp", 0, "calibration_data_temp_2025-04-13_04-07-12.json")
         """
-        logger.info(f"Requesting {parameter} calibration data for Smart Station {station_id}")
+        self.logger.info(f"Requesting {parameter} calibration data for Smart Station {station_id}")
         self.emit("request_calibration", {"parameter": parameter, "station_id": station_id, "filename": filename})
 
     def send_calibration(self, parameter: str, calibration_data: dict, timestamp: str):
@@ -317,7 +322,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
                     text_file.write(
                         f"{self.status.elapsed_time}_{station.od_data[vial_id][-1].voltage}_{station.od_data[vial_id][-1].transformed}\n"
                     )
-        logger.debug("Recent broadcast data saved to memory")
+        self.logger.debug("Recent broadcast data saved to memory")
 
     def send_command(
         self,
@@ -344,7 +349,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         command = {"param": parameter, "values": values, "immediate": immediate, "recurring": recurring}
 
         self.emit("command", command)
-        logger.info(f"Following command sent to the server via the eVOLVER namespace: {command}")
+        self.logger.info(f"Following command sent to the server via the eVOLVER namespace: {command}")
 
     def change_ipp_frequency(self, frequency_commands: dict[int, int]):
         """Update EffluxBoard frequency configurations.
