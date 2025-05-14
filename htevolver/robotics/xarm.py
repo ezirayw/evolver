@@ -49,10 +49,9 @@ class xArm:
         max_mvacc (int): Maximum allowed acceleration setting.
     """
 
-    arm_api: XArmAPI
+    arm_api: XArmAPI = field(repr=False)
     ip: str
     connected: bool
-
     roll: int
     pitch: int
     yaw: int

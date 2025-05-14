@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, ClassVar
 
 from tecancavro.models import XCaliburD
@@ -30,7 +30,7 @@ class PumpPort:
 
     id: int
     fluid: FluidTypes
-    starting_volume: int
+    starting_volume: int = field(repr=False)
     current_volume: int
     primed: bool
 
@@ -119,10 +119,9 @@ class DummyPump:
 
     id: int
     enabled: bool
-
     primary_fluid: FluidTypes
     ports: dict[int, PumpPort]
-    head_port: int
+    head_port: int = field(repr=False)
     active_port: int
 
     @classmethod
@@ -262,11 +261,10 @@ class XCaliburDPump:
 
     id: int
     enabled: bool
-
-    hardware_api: XCaliburD
+    hardware_api: XCaliburD = field(repr=False)
     primary_fluid: FluidTypes
     ports: dict[int, PumpPort]
-    head_port: int
+    head_port: int = field(repr=False)
     active_port: int
 
     @classmethod
@@ -478,7 +476,7 @@ class PipetteHead:
 
     pumps: tuple[PumpProtocol, ...]
     pump_num: int
-    universal: bool
+    universal: bool = field(repr=False)
     num_windows: int
     active_pumps: list[PumpProtocol]
     pump_factory: ClassVar[dict[str, type[PumpProtocol]]] = {"dummy": DummyPump, "XCaliburD": XCaliburDPump}
