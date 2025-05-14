@@ -32,12 +32,19 @@ from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalib
 
 # Configure logging
 logger = logging.getLogger("calibrate_od")
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-    filename="/home/pi/logs/calibrate_od.log",
-)
+logger.setLevel(logging.INFO)
+file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S")
+stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
+
+# Create handlers
+file_handler = logging.FileHandler("/home/pi/logs/calibrate_od.log")
+stream_handler = logging.StreamHandler()
+
+# Set formatter for both handlers
+file_handler.setFormatter(file_formatter)
+stream_handler.setFormatter(stream_formatter)
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
 
 
 DEFAULT_VIALS_OD = list(range(18))

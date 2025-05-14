@@ -145,14 +145,14 @@ class SmartStationClient:
         """
         new_temp_entry: SensorData = SensorData()
         new_temp_entry.voltage = broadcast_data.data["temp"][self.id]
-        if not self.temp_cal:
-            logger.warning(f"Tried to transform temperature voltage for station_{self.id} but no calibration found")
-        else:
+        if self.temp_cal:
             new_temp_entry.transformed = self.temp_cal.linear(
                 new_temp_entry.voltage,
                 *self.temp_cal.coefficients,
             )
             logger.debug(f"Transformed temp for station_{self.id}")
+        else:
+            logger.debug(f"Tried to transform temperature voltage for station_{self.id} but no calibration found")
         self.temp_data.append(new_temp_entry)
 
         for index in range(9):
@@ -165,9 +165,7 @@ class SmartStationClient:
             new_left_od_entry.voltage = broadcast_data.data["od_90_left"][index + 9 * self.id]
             new_right_od_entry.voltage = broadcast_data.data["od_90_right"][index + 9 * self.id]
 
-            if not self.od_cal:
-                logger.warning(f"Tried to transform OD voltages for station_{self.id} but no calibration found")
-            else:
+            if self.od_cal:
                 new_left_od_entry.transformed = self.od_cal[left_vial_id].sigmoid(
                     new_left_od_entry.voltage, *self.od_cal[left_vial_id].coefficients
                 )
@@ -177,6 +175,9 @@ class SmartStationClient:
                 logger.debug(f"transforming od_left for station_{self.id}")
             self.od_data[left_vial_id].append(new_left_od_entry)
             self.od_data[right_vial_id].append(new_right_od_entry)
+
+        if not self.od_cal:
+            logger.debug(f"Tried to transform OD voltages for station_{self.id} but no calibration found")
 
 
 class EvolverClientNamespace(socketio.ClientNamespace):
@@ -235,18 +236,15 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             data (dict): Broadcast data received from the server.
         """
         broadcast_data = BroadcastData(**data)
+        logger.info(f"eVOLVER namespace broadcast: {broadcast_data}")
         if broadcast_data.phase == 1:
-            try:
-                for station in self.stations.values():
-                    station.process_broadcast_data(broadcast_data)
+            for station in self.stations.values():
+                station.process_broadcast_data(broadcast_data)
 
-                if self.save:
-                    self.save_data()
+            if self.save:
+                self.save_data()
 
-                self.broadcast_counter += 1
-                logger.info(f"eVOLVER namespace broadcast processed: {broadcast_data}")
-            except TypeError as e:
-                logger.warning(f"Error trying to processes eVOLVER namespace broadcast data: {e}")
+            self.broadcast_counter += 1
 
     def on_get_calibration(self, data):
         """Handle calibration data received from the server.

@@ -36,12 +36,21 @@ from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalib
 
 # Configure logging
 logger = logging.getLogger("calibrate_temp")
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.INFO,
-    filename="/home/pi/logs/calibrate_temp.log",
-)
+logger.setLevel(logging.INFO)
+
+# Create handlers
+file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
+stream_handler = logging.StreamHandler()
+
+file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S")
+stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
+
+
+# Set formatter for both handlers
+file_handler.setFormatter(file_formatter)
+stream_handler.setFormatter(stream_formatter)
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
 
 # Constants
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
@@ -104,7 +113,7 @@ def collect_temperature_measurements(station_list: list[int]):
 
     for station_id in station_list:
         temperature_input = None
-        print(f"\nMeasure vial temperatures for Smart Station:{station_id} with probe to generate temperature standards")
+        logger.info(f"\nMeasure vial temperatures for Smart Station:{station_id} with probe to generate temperature standards")
         for position_index, vial_position in enumerate(MEASURE_VIALS):
             while True:
                 try:
@@ -120,7 +129,7 @@ def collect_temperature_measurements(station_list: list[int]):
                         else:
                             continue
                 except ValueError:
-                    print("Input a valid float number")
+                    logger.info("Input a valid float number")
             temperature_measurements[station_id][position_index] = temperature_input
 
     return temperature_measurements
@@ -199,7 +208,7 @@ def collect_temp_data(
         )  # get rid of room_temp
         below_rt = np.round(np.linspace(calibration_data[station].voltage[room_temp_step_num], MIN_TEMP, num_standards + 2))
         setpoints[station] = np.append(above_rt, below_rt).astype(int)
-        print(f"Setpoints for station {station}: {setpoints[station]} ")
+        logger.info(f"Setpoints for station {station}: {setpoints[station]} ")
 
     # Loop through all temperature setpoints
     for step_num in range(calibration_steps):
@@ -207,13 +216,13 @@ def collect_temp_data(
         if step_num == room_temp_step_num:
             continue
 
-        print(f"\n---- Starting temperature sweep step: {step_num}/{calibration_steps - 1} ----")
+        logger.info(f"\n---- Starting temperature sweep step: {step_num}/{calibration_steps - 1} ----")
 
         # Set uncalibrated temperature for each station
         temp_commands = [0] * 4
         for station in station_list:
             temp_commands[station] = int(setpoints[station][step_num])
-        print(f"Sending setpoints: {temp_commands} to HT-eVOLVER...")
+        logger.info(f"Sending setpoints: {temp_commands} to HT-eVOLVER...")
         htevolver_client.evolver.send_command("temp", temp_commands, immediate=True, recurring=True)
 
         # Wait for equilibration
@@ -229,7 +238,7 @@ def collect_temp_data(
         temperature_measurements = collect_temperature_measurements(station_list)
 
         # Store data for this temperature point
-        print(
+        logger.info(
             f"Done collecting voltage temperature data, calculating and storing median values for calibration procedure step: {step_num}/{calibration_steps - 1}"
         )
         for station_id in station_list:
@@ -259,7 +268,7 @@ def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -
         >>> fitted_data = fit_data(calibration_data)
     """
 
-    print("\nGenerating linear fit for collected Temperature data...")
+    logger.info("\nGenerating linear fit for collected Temperature data...")
 
     for station in calibration_data:
         coefficients, cov = curve_fit(
@@ -289,7 +298,7 @@ if __name__ == "__main__":
     evolver_ip = options.ip_address
 
     if int(options.standard_number) < STANDARD_NUM_MIN:
-        print(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
+        logger.info(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
@@ -311,11 +320,11 @@ if __name__ == "__main__":
     try:
         with open(filename, "w") as f:
             json.dump(serializable_data, f, indent=4)
-        print(f"Calibration data saved to {filename}")
+        logger.info(f"Calibration data saved to {filename}")
     except TypeError as e:
-        print(f"Error serializing data: {e}")
+        logger.info(f"Error serializing data: {e}")
         # Handle any remaining serialization issues
         with open(filename, "w") as f:
             serializable_data_str = str(serializable_data)
             f.write(serializable_data_str)
-        print(f"Calibration data (as string) saved to {filename}")
+        logger.info(f"Calibration data (as string) saved to {filename}")
