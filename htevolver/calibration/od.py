@@ -18,33 +18,41 @@ to convert raw voltage readings to calibrated OD values during experiments.
 
 import argparse
 import datetime
-import json
 import logging
 import os
 import sys
 
 import numpy as np
-import socketio
 from scipy.optimize import curve_fit
 
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
-# Configure logging
-logger = logging.getLogger("calibrate_od")
-logger.setLevel(logging.INFO)
-file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S")
-stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
+# Configure client logger (logs to file)
+client_logger = logging.getLogger("htevolver.htevolver_client")
+calibration_logger = logging.getLogger("htevolver.calibration")
+
+# Configure calibration logger (logs to console)
+calibration_logger.setLevel(logging.INFO)
+client_logger.setLevel(logging.INFO)
 
 # Create handlers
 file_handler = logging.FileHandler("/home/pi/logs/calibrate_od.log")
-stream_handler = logging.StreamHandler()
+file_handler.setLevel(logging.INFO)
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.INFO)
+
+client_logger.addHandler(file_handler)
+calibration_logger.addHandler(stream_handler)
 
 # Set formatter for both handlers
+file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s")
 file_handler.setFormatter(file_formatter)
 stream_handler.setFormatter(stream_formatter)
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
+
+# Use the calibration logger for this module
+logger = calibration_logger
 
 
 DEFAULT_VIALS_OD = list(range(18))
@@ -80,6 +88,13 @@ def get_options():
         type=lambda s: int(s),
         required=False,
         help="List of Smart Stations to iterate calibration protocol over (space separated), defaults to all if left blank",
+    )
+    parser.add_argument(
+        "-f",
+        "--file",
+        action="store",
+        required=False,
+        help="Filename that contains serialized CalibrationData representing an incomplete calibration procedure.",
     )
 
     return parser.parse_args(), parser
@@ -239,7 +254,7 @@ if __name__ == "__main__":
     evolver_ip = options.ip_address
 
     if int(options.standard_number) < STANDARD_NUM_MIN:
-        print(f"more standards are needed, must be at least {STANDARD_NUM_MIN}")
+        logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 
     station_list: list[int] = []
@@ -249,9 +264,6 @@ if __name__ == "__main__":
         station_list = [0, 1, 2, 3]
 
     htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
-    socketIO_eVOLVER = socketio.Client()
-    socketIO_eVOLVER.register_namespace(htevolver_client)
-    socketIO_eVOLVER.connect("http://{0}:{1}".format(evolver_ip, 8081))
 
     # start data collection procedure based on target calibration protocol
     collected_calibration_data = {}
@@ -272,8 +284,7 @@ if __name__ == "__main__":
                     vial_list.sort()
                     break
                 except ValueError:
-                    print("Invalid list, try again")
-        print(vial_list)
+                    logger.error("Invalid list, try again")
         collected_calibration_data = collect_od_data(htevolver_client, vial_list, station_id, int(options.standard_number))
         final_calibration_data[station_id] = fit_data(collected_calibration_data, True)
 
@@ -287,15 +298,7 @@ if __name__ == "__main__":
     # Send calibration data to server for long-term storage
     htevolver_client.send_calibration("od", serialized_calibration_data, timestamp)
 
-    # Write to file in the calibration directory backup on the client
-    try:
-        with open(filename, "w") as f:
-            json.dump(serialized_calibration_data, f, indent=4)
-    except TypeError as e:
-        print(f"Error serializing data: {e}")
-        with open(filename, "w") as f:
-            serialized_calibration_data_str = str(serialized_calibration_data)
-            f.write(serialized_calibration_data_str)
-    print(f"Calibration backup saved to {filename}")
+    serializable_data = CalibrationData.to_json(final_calibration_data)
+    CalibrationData.to_file(filename, serializable_data)
 
-    socketIO_eVOLVER.disconnect()
+    htevolver_client.disconnect()

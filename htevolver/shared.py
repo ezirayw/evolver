@@ -47,6 +47,12 @@ class BroadcastData:
     data: dict[str, list[int]] = field(default_factory=dict)
     config: str = field(default="")
 
+    def validate(self, parameter_list: list[str] = ["temp", "od_90_left", "od_90_right"]):
+        for parameter in parameter_list:
+            if parameter not in self.data:
+                return False
+        return True
+
 
 #### STATUS MANAGEMENT CLASSES ####
 @dataclass

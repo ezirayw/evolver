@@ -46,7 +46,6 @@ class HTEvolverClient:
         self.station_ids = station_ids or [0, 1, 2, 3]
         self.port = port
         self.data_buffer_size = data_buffer_size
-        self.logger = logging.getLogger(__name__)
 
         # Create data directory if it doesn't exist
         if self.save and not os.path.exists(self.directory):
@@ -70,7 +69,7 @@ class HTEvolverClient:
         self.sio.register_namespace(self.evolver)
         self.sio.register_namespace(self.robotics)
         self.sio.connect(f"http://{self.ip}:{self.port}")
-        self.logger.info("Successfully established HT-eVOLVER client instance")
+        logger.info("Successfully established HT-eVOLVER client instance")
 
     def connect(self) -> None:
         """Connect to HTeVOLVER.
@@ -106,8 +105,7 @@ class HTEvolverClient:
         self.robotics.disconnect_xArm()
         self.robotics.disable_pumps()
         self.sio.disconnect()
-        self.logger.info("Disconnected from the HTeVOLVER server")
-        self.sio.disconnect()
+        logger.info("Disconnected from the HTeVOLVER server")
 
     def set_temp_calibration(self, station_id: int, filename: str):
         """Set temperature calibration for a specific station.
@@ -122,7 +120,7 @@ class HTEvolverClient:
         Examples:
             >>> client.set_temp_calibration(0, "calibration_data_temp_2025-04-13_04-07-12.json")
         """
-        self.logger.info(f"Setting the temperature calibration for Smart Station {station_id} with filename: {filename}")
+        logger.info(f"Setting the temperature calibration for Smart Station {station_id} with filename: {filename}")
         self.evolver.request_calibration("temp", station_id, filename)
 
     def update_temp(self, new_station_temps: dict[int, int]):
@@ -227,18 +225,14 @@ class HTEvolverClient:
                 return_data[station_id][vial_id] = tuple(data_entry)
         return return_data
 
-    def get_new_temp(
-        self, station_list: list[int], num_readings: int = 3, timeout: int = 60
-    ) -> dict[int, tuple[int | float, ...]]:
+    def get_new_temp(self, station_list: list[int], num_readings: int = 3) -> dict[int, tuple[int | float, ...]]:
         """Collect incoming temperature voltage readings.
 
-        Blocks until the specified number of new temperature readings are collected
-        or until the timeout is reached.
+        Blocks until the specified number of new temperature readings are collected.
 
         Args:
             station_list (list[int]): List of station IDs to collect readings from.
             num_readings (int): Number of readings to take for each station. Defaults to 3.
-            timeout (int): Maximum time in seconds to wait for readings. Defaults to 60.
 
         Returns:
             dict[int, tuple[int | float, ...]]: Dictionary mapping station IDs to tuples of voltage readings.
@@ -253,35 +247,27 @@ class HTEvolverClient:
         read_num: int = 0
         current_counter = self.evolver.broadcast_counter
 
-        self.logger.info("TEMPERATURE readings starting, do not move vials or exit...")
-        start_time = time.time()
         while read_num < num_readings:
-            current_time = time.time()
+            time.sleep(0.1)
             if current_counter != self.evolver.broadcast_counter:
-                self.logger.info(f"New broadcast detected, storing voltage values for read {read_num}")
+                logger.debug(f"New broadcast detected, storing voltage values for read {read_num}")
                 for station_id in station_list:
                     new_temp_data = self.evolver.stations[station_id].temp_data[-1].voltage
                     voltage_readings[station_id].append(new_temp_data)
                 current_counter = self.evolver.broadcast_counter
-                start_time = time.time()
                 read_num += 1
-            if (current_time - start_time) >= timeout:
-                self.logger.warning(f"Timeout exceeded on while running get_new_temp() on read number: {read_num}")
+
         return_data = {station_id: tuple(temp_data) for station_id, temp_data in voltage_readings.items()}
         return return_data
 
-    def get_new_od(
-        self, station_list: list[int], num_readings: int = 3, timeout: int = 60
-    ) -> dict[int, dict[int, tuple[int | float, ...]]]:
+    def get_new_od(self, station_list: list[int], num_readings: int = 3) -> dict[int, dict[int, tuple[int | float, ...]]]:
         """Collect incoming optical density voltage readings.
 
-        Blocks until the specified number of new OD readings are collected
-        or until the timeout is reached.
+        Blocks until the specified number of new OD readings are collected.
 
         Args:
             station_list (list[int]): List of station IDs to collect readings from.
             num_readings (int): Number of readings to take for each container. Defaults to 3.
-            timeout (int): Maximum time in seconds to wait for readings. Defaults to 60.
 
         Returns:
             dict[int, dict[int, tuple[int | float, ...]]]: Nested dictionary mapping station IDs
@@ -299,21 +285,16 @@ class HTEvolverClient:
         for station_id in station_list:
             voltage_readings[station_id] = {vial_id: [] for vial_id in range(18)}
 
-        self.logger.info("OD readings starting, do not move vials or exit...")
-        start_time = time.time()
         while read_num < num_readings:
-            current_time = time.time()
+            time.sleep(0.1)
             if current_counter != self.evolver.broadcast_counter:
-                self.logger.info(f"New broadcast detected, storing voltage values for read {read_num}")
+                logger.debug(f"New broadcast detected, storing voltage values for read {read_num}")
                 for station_id in station_list:
                     for vial_id in range(18):
                         new_od_data = self.evolver.stations[station_id].od_data[vial_id][-1].voltage
                         voltage_readings[station_id][vial_id].append(new_od_data)
                 current_counter = self.evolver.broadcast_counter
-                start_time = time.time()
                 read_num += 1
-            if (current_time - start_time) >= timeout:
-                self.logger.warning(f"Timeout exceeded on while running get_new_od() on read number: {read_num}")
 
         return_data: dict[int, dict[int, tuple[int | float, ...]]] = {}
         for station_id in station_list:

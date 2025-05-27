@@ -68,8 +68,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         Called when a connection is established to the server.
         Automatically requests status, configuration, and type information.
         """
-        self.request_robotics_status()
-        self.request_robotics_conf()
+
         logger.info("Client connected to HTeVOVLER server via robotics namespace")
 
     def on_disconnect(self):

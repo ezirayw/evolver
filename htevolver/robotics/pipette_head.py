@@ -234,9 +234,9 @@ def pump_action(func: Callable):
         if self.enabled:
             try:
                 func(self, *args, **kwargs)
-            except (SyringeError, SyringeTimeout) as e:
-                logger.error(f"Error trying to run {func.__name__} on PipetteHead Pump_{self.id}: {e}")
-                raise PipetteHeadError(f"Error trying to run {func.__name__} on PipetteHead Pump_{self.id}: {e}")
+            except (SyringeError, SyringeTimeout):
+                logger.exception(f"Error trying to run {func.__name__} on PipetteHead Pump_{self.id}", stack_info=True)
+                raise PipetteHeadError(f"Error trying to run {func.__name__} on PipetteHead Pump_{self.id}")
         else:
             raise PipetteHeadError(f"PipetteHead Pump_{self.id} cannot run {func.__name__}, not connected")
 
@@ -266,6 +266,7 @@ class XCaliburDPump:
     ports: dict[int, PumpPort]
     head_port: int = field(repr=False)
     active_port: int
+    prime_volume: int = field(repr=False)
 
     @classmethod
     def create(cls, pump_id: int, pump_config: dict) -> "XCaliburDPump":
@@ -307,6 +308,7 @@ class XCaliburDPump:
             head_port=pump_config.get("head_port", 0),
             active_port=0,
             enabled=False,
+            prime_volume=pump_config.get("prime_volume", 5),
         )
 
     def enable(self):
@@ -407,7 +409,8 @@ class XCaliburDPump:
         Raises:
             PipetteHeadError: If dispense fails or the pump is not connected.
         """
-        self.hardware_api.dispense(self.head_port, volume)
+        self.hardware_api.dispense(self.head_port, volume + self.prime_volume)
+        self.hardware_api.extract(self.head_port, volume)
         delay = self.hardware_api.executeChain()
         self.hardware_api.waitReady(int(delay))
 
@@ -422,7 +425,8 @@ class XCaliburDPump:
             PipetteHeadError: If priming fails or the pump is not connected.
         """
         for port_id, port in self.ports.items():
-            self.hardware_api.primePort(in_port=port_id, out_port=self.head_port, volume_ul=800)
+            self.hardware_api.primePort(in_port=port_id, out_port=self.head_port, volume_ul=50000)
+        self.hardware_api.extract(self.head_port, self.prime_volume)
 
     @pump_action
     def pause(self):

@@ -23,7 +23,6 @@ to convert raw voltage readings to calibrated temperature values during experime
 
 import argparse
 import datetime
-import json
 import logging
 import os
 import sys
@@ -34,9 +33,31 @@ from scipy.optimize import curve_fit
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
-# Create logging instance
-logger = logging.getLogger(__name__)
+# Configure client logger (logs to file)
+client_logger = logging.getLogger("htevolver.htevolver_client")
+calibration_logger = logging.getLogger("htevolver.calibration")
 
+# Configure calibration logger (logs to console)
+calibration_logger.setLevel(logging.INFO)
+client_logger.setLevel(logging.INFO)
+
+# Create handlers
+file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
+file_handler.setLevel(logging.INFO)
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.INFO)
+
+client_logger.addHandler(file_handler)
+calibration_logger.addHandler(stream_handler)
+
+# Set formatter for both handlers
+file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s")
+file_handler.setFormatter(file_formatter)
+stream_handler.setFormatter(stream_formatter)
+
+# Use the calibration logger for this module
+logger = calibration_logger
 
 # Constants
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
@@ -75,7 +96,18 @@ def get_options():
         help="List of Smart Stations to iterate calibration protocol over (space separated), defaults to all if left blank",
     )
 
+    parser.add_argument(
+        "-f",
+        "--file",
+        action="store",
+        required=False,
+        help="Filename that contains serialized CalibrationData representing an incomplete calibration procedure.",
+    )
+
     return parser.parse_args(), parser
+
+
+def save_procedure(): ...
 
 
 def collect_temperature_measurements(station_list: list[int]):
@@ -106,16 +138,15 @@ def collect_temperature_measurements(station_list: list[int]):
                     temperature_input = float(
                         input(f"Enter temperature (C) value for vial slot {vial_position} in Smart Station:{station_id}: ")
                     )
-                    if temperature_input >= 0:
+                    if temperature_input >= 0 and temperature_input <= 100:
                         validation = input(
-                            f"Entered value is {temperature_input}. Press enter to commit this value or type 'return' to re-enter a temperature."
+                            f"Entered value is {temperature_input}. Press Enter to commit this value or type 'return' to re-enter a temperature."
                         )
                         if validation == "":
                             break
-                        else:
-                            continue
+
                 except ValueError:
-                    logger.info("Input a valid float number")
+                    logger.exception("Error, must input a valid float number", stack_info=True)
             temperature_measurements[station_id][position_index] = temperature_input
 
     return temperature_measurements
@@ -151,6 +182,7 @@ def collect_temp_data(
             standards=np.zeros((num_standards * 2) + 3),
             standard_deviation=np.zeros((num_standards * 2) + 3),
             coefficients=np.zeros(2),
+            complete=False,
         )
         for station_id in station_list
     }
@@ -172,63 +204,78 @@ def collect_temp_data(
 
     # Room temperature step
     room_temp_step_num = int(np.floor(calibration_steps / 2))
-    # Collect voltage readings for room temperature
+    logger.info("Room temperature readings voltage readings starting, do not move vials or exit...")
     voltage_triplets = htevolver_client.get_new_temp(station_list)
-    # Collect temperature measurements for room temperature
+    logger.info("Done collecting room temperature voltage readings. Prepare to take temperature readings from vials.")
     temperature_measurements = collect_temperature_measurements(station_list)
 
-    # Store room temperature data
+    logger.info("Storing room temperature voltage and Celsius data.")
     for station_id in station_list:
         calibration_data[station_id].voltage[room_temp_step_num] = np.nanmedian(voltage_triplets[station_id])
         calibration_data[station_id].standard_deviation[room_temp_step_num] = np.std(voltage_triplets[station_id], dtype=float)
         calibration_data[station_id].standards[room_temp_step_num] = np.mean(temperature_measurements[station_id])
 
-    # Calculate setpoints for all temperatures
+    logger.info("Auto-calculating calibration setpoints based on number of temperature standards inputs.")
     setpoints = {}
-    for station in station_list:
+    for station_id in station_list:
         above_rt = np.delete(
-            np.round(np.linspace(MAX_TEMP, calibration_data[station].voltage[room_temp_step_num], num_standards + 2)),
+            np.round(np.linspace(MAX_TEMP, calibration_data[station_id].voltage[room_temp_step_num], num_standards + 2)),
             -1,
         )  # get rid of room_temp
-        below_rt = np.round(np.linspace(calibration_data[station].voltage[room_temp_step_num], MIN_TEMP, num_standards + 2))
-        setpoints[station] = np.append(above_rt, below_rt).astype(int)
-        logger.info(f"Setpoints for station {station}: {setpoints[station]} ")
+        below_rt = np.round(np.linspace(calibration_data[station_id].voltage[room_temp_step_num], MIN_TEMP, num_standards + 2))
+        setpoints[station_id] = np.append(above_rt, below_rt).astype(int)
+        logger.info(f"Setpoints for Smart Station {station_id}: {setpoints[station_id]} ")
 
     # Loop through all temperature setpoints
     for step_num in range(calibration_steps):
         # Skip room temperature setpoint since we already have it
         if step_num == room_temp_step_num:
             continue
-
         logger.info(f"\n---- Starting temperature sweep step: {step_num}/{calibration_steps - 1} ----")
 
         # Set uncalibrated temperature for each station
         temp_commands = [0] * 4
-        for station in station_list:
-            temp_commands[station] = int(setpoints[station][step_num])
-        logger.info(f"Sending setpoints: {temp_commands} to HT-eVOLVER...")
+        for station_id in station_list:
+            temp_commands[station_id] = int(setpoints[station_id][step_num])
+        logger.info(f"{step_num}/{calibration_steps - 1}  Sending setpoints: {temp_commands} to HT-eVOLVER...")
         htevolver_client.evolver.send_command("temp", temp_commands, immediate=True, recurring=True)
 
         # Wait for equilibration
         while True:
-            proceed = input("Wait for 30 mins to allow for heat equilibration...\nPress Enter to continue.")
+            proceed = input(
+                f"{step_num}/{calibration_steps - 1}  Wait for 30 mins to allow for heat equilibration...\nPress Enter to continue."
+            )
             if proceed == "":
                 break
 
-        # Collect voltage readings
+        logger.info(
+            f"{step_num}/{calibration_steps - 1}  Temperature readings voltage readings starting for {step_num}, do not move vials or exit..."
+        )
         voltage_triplets = htevolver_client.get_new_temp(station_list)
 
-        # Collect temperature measurements
+        logger.info(
+            f"{step_num}/{calibration_steps - 1}  Done collecting room temperature voltage readings. Prepare to take temperature readings from vials."
+        )
         temperature_measurements = collect_temperature_measurements(station_list)
 
         # Store data for this temperature point
         logger.info(
-            f"Done collecting voltage temperature data, calculating and storing median values for calibration procedure step: {step_num}/{calibration_steps - 1}"
+            f"{step_num}/{calibration_steps - 1}  Done collecting temperature data, calculating and storing median values for calibration procedure step"
         )
         for station_id in station_list:
             calibration_data[station_id].voltage[step_num] = np.nanmedian(voltage_triplets[station_id])
             calibration_data[station_id].standard_deviation[step_num] = np.std(voltage_triplets[station_id], dtype=float)
             calibration_data[station_id].standards[step_num] = np.mean(temperature_measurements[station_id])
+
+        logger.info(f"{step_num}/{calibration_steps - 1}  Saving current state of calibration to memory.")
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = os.path.join(htevolver_client.calibration_directory, f"calibration_data_temp_{timestamp}_INCOMPLETE.json")
+        current_calibration_state = CalibrationData.to_json(calibration_data)
+        CalibrationData.to_file(filename, current_calibration_state)
+
+    for station_id in station_list:
+        calibration_data[station_id].complete = True
 
     return calibration_data
 
@@ -254,13 +301,13 @@ def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -
 
     logger.info("\nGenerating linear fit for collected Temperature data...")
 
-    for station in calibration_data:
+    for station_id in calibration_data:
         coefficients, cov = curve_fit(
-            CalibrationData.linear, calibration_data[station].standards, calibration_data[station].voltage
+            CalibrationData.linear, calibration_data[station_id].standards, calibration_data[station_id].voltage
         )
-        calibration_data[station].coefficients = coefficients
+        calibration_data[station_id].coefficients = coefficients
     if graph:
-        max_values = np.array([np.max(calibration_data[station].voltage) for station in calibration_data])
+        max_values = np.array([np.max(calibration_data[station_id].voltage) for station_id in calibration_data])
         max_value = np.max(max_values)
         grapher = GraphCalibration(
             container_type="Smart Station",
@@ -281,32 +328,14 @@ if __name__ == "__main__":
     options, parser = get_options()
     evolver_ip = options.ip_address
 
-    logger.setLevel(logging.DEBUG)
-
-    # Create handlers
-    file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
-    file_handler.setLevel(logging.INFO)
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
-
-    # Set formatter for both handlers
-    file_formatter = logging.Formatter(
-        fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s\n", datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    stream_formatter = logging.Formatter(fmt="%(name)s - [%(levelname)s] - %(message)s\n")
-    file_handler.setFormatter(file_formatter)
-    stream_handler.setFormatter(stream_formatter)
-
     if int(options.standard_number) < STANDARD_NUM_MIN:
-        logger.info(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
+        logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
     htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
-    logger.info("YOOOOOOOO")
+
     # Start data collection procedure
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
     final_calibration_data = fit_data(collected_calibration_data, True)
@@ -315,18 +344,7 @@ if __name__ == "__main__":
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = os.path.join(htevolver_client.calibration_directory, f"calibration_data_temp_{timestamp}.json")
 
-    # Convert data to serializable format
     serializable_data = CalibrationData.to_json(final_calibration_data)
+    CalibrationData.to_file(filename, serializable_data)
 
-    # Write to file
-    try:
-        with open(filename, "w") as f:
-            json.dump(serializable_data, f, indent=4)
-        logger.info(f"Calibration data saved to {filename}")
-    except TypeError as e:
-        logger.info(f"Error serializing data: {e}")
-        # Handle any remaining serialization issues
-        with open(filename, "w") as f:
-            serializable_data_str = str(serializable_data)
-            f.write(serializable_data_str)
-        logger.info(f"Calibration data (as string) saved to {filename}")
+    htevolver_client.disconnect()

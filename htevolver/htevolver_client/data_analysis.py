@@ -27,6 +27,7 @@ class CalibrationData:
     standards: np.ndarray
     coefficients: np.ndarray
     standard_deviation: np.ndarray
+    complete: bool = field(default=False)
 
     @staticmethod
     def sigmoid(x: int | float, a: float, b: float, c: float, d: float) -> float:
@@ -91,12 +92,28 @@ class CalibrationData:
         """
         if isinstance(data, np.ndarray):
             return data.tolist()
+        if isinstance(data, bool):
+            return data
         elif isinstance(data, dict):
             return {k: CalibrationData.to_json(v) for k, v in data.items()}
         elif isinstance(data, list) or isinstance(data, tuple):
             return [CalibrationData.to_json(item) for item in data]
         else:
             return data
+
+    @staticmethod
+    def to_file(filename: str, calibration_data: dict):
+        try:
+            with open(filename, "w") as f:
+                json.dump(calibration_data, f, indent=4)
+            logger.info(f"Calibration data saved to {filename}")
+        except TypeError:
+            logger.exception(f"Error serializing data: {calibration_data}", stack_info=True)
+
+            with open(filename, "w") as f:
+                serializable_data_str = str(calibration_data)
+                f.write(serializable_data_str)
+            logger.info(f"Calibration data (as string) saved to {filename}")
 
     @classmethod
     def from_dict(cls, deserialize_data: dict):

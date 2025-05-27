@@ -244,8 +244,8 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
                 self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] = evolver_command.value
             self.save_conf()
             logger.info(f"Finished processed received EvolverCommand: {evolver_command}")
-        except EvolverError as e:
-            logger.warning(f"Error processing received EvolverCommand: {e}")
+        except EvolverError:
+            logger.exception(f"Error processing received EvolverCommand: {command}", stack_info=True)
 
     async def on_request_status(self, sid):
         """Respond with the current eVOLVER status.
@@ -305,10 +305,10 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             await self.emit("get_calibration", sid, {"calibration_data": calibration_data, "station_id": data["station_id"]})
             logger.info("Finished loading calibration data")
         except FileNotFoundError:
-            logger.warning(f"Error loading calibration file: {data['filename']}")
+            logger.exception(f"Error loading calibration file: {data['filename']}", stack_info=True)
             await self.emit("get_calibration", sid, {"calibration_data": {}, "station_id": data["station_id"]})
 
-    async def on_receive_calibration(self, sid, new_calibration_data):
+    async def on_receive_calibration(self, sid, new_calibration_data: dict):
         """Save calibration data received from a client.
 
         Stores new calibration data received from a client to the appropriate file.
@@ -332,8 +332,8 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             with open(filename, "w") as f:
                 json.dump(new_calibration_data["data"], f, indent=4)
             logger.info(f"Calibration successfully saved to {filename}")
-        except Exception as e:
-            logger.warning(f"Error saving calibration data: {e}. Saving a string-formatted backup")
+        except FileNotFoundError as e:
+            logger.exception(f"Error saving calibration data: {e}. Saving a string-formatted backup")
             filename = os.path.join(
                 self.calibration_directory, parameter, f"calibration_data_{parameter}_{timestamp}_STRING-BACKUP.txt"
             )
@@ -373,9 +373,6 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
 
         Returns:
             dict: Data returned from the Arduino for each parameter.
-
-        Raises:
-            EvolverSerialError: If serial communication with the Arduino fails.
         """
         data: dict[str, list[int]] = {}
         while len(self.command_queue) > 0:
@@ -384,13 +381,8 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
                 returned_data: list[int] = self.serial_communication(command)
                 data[command.param] = returned_data
                 logger.debug(f"Processed the following SerialCommand: {command}")
-            except (
-                TypeError,
-                ValueError,
-                serial.serialutil.SerialException,
-                EvolverSerialError,
-            ) as e:
-                logger.error(f"EvolverSerialError: {e}")
+            except (serial.SerialException, EvolverSerialError):
+                logger.exception("Error porcessing serial commands in queue", stack_info=True)
         return data
 
     def cobs_encode(self, data: bytearray) -> bytearray:
@@ -570,9 +562,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         try:
             packed_decoded_response = self.cobs_decode(response_bytes)
             logger.debug(f"Serial decoded response from arduino: {packed_decoded_response.hex(' ')}")
-        except Exception as e:
-            logger.error(f"Error decoding COBS response: {e}")
-            raise EvolverSerialError(f"Error decoding COBS response: {e}")
+        except Exception:
+            logger.exception("Error decoding COBS response", stack_info=True)
+            raise EvolverSerialError("Error decoding COBS response")
 
         if len(packed_decoded_response) < 3:  # At least address, length, and type
             logger.error(f"Response too short: {packed_decoded_response.hex(' ')}")
@@ -584,7 +576,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             calculated_checksum = (calculated_checksum & 0xFF) + (calculated_checksum >> 8)
 
         if calculated_checksum != 0xFF:
-            logger.error(f"Checksum verification failed: calculated=0x{calculated_checksum:02x}, expected=0x{0xFF:02x}")
+            logger.exception(
+                f"Checksum verification failed: calculated=0x{calculated_checksum:02x}, expected=0x{0xFF:02x}", stack_info=True
+            )
             raise EvolverSerialError("Checksum verification failed for response packet")
 
         # ACKNOWLEDGE - send acknowledgment to arduino
