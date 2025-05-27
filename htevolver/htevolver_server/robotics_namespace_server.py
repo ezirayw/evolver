@@ -735,9 +735,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         # emit robotics status to all connected clients
         await self.emit("broadcast", self.to_dict())
-        logging.info(
-            f"Robotics broadcast:\nPipetteHead: {self.pipette_head}\n\nxArm: {self.arm}\n\nSmartStations: {self.stations}"
-        )
+        logger.info(f"PipetteHead Broadcast: {self.pipette_head}")
+        logger.info(f"xArm Broadcast: {self.arm}")
+        logger.info(f"SmartStation Broadcast: {self.stations}")
 
     def error_warn_change_callback(self, xarm_api_data: dict):
         """Update error and warning codes based on xArm feedback.

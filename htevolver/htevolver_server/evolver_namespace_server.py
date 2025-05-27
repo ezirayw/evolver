@@ -673,7 +673,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             config=self.evolver_conf["parameters"][f"phase_{phase}"],
             timestamp=time.time(),
         )
-        logging.info(f"eVOLVER Broadcast: {broadcast_data}")
+        logger.info(f"eVOLVER Broadcast: {broadcast_data}")
         await self.emit("broadcast", asdict(broadcast_data))
         self.running_broadcast = False
         return True
