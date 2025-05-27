@@ -18,7 +18,7 @@ ROBOTICS_CONF_FILENAME = "robotics_conf.yml"
 logger = logging.getLogger("htevolver")
 logger.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
+file_handler = logging.FileHandler("/home/pi/logs/htevolver.log")
 file_handler.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
