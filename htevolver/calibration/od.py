@@ -16,7 +16,6 @@ The calibration data is also sent to the server for storage and later use by the
 to convert raw voltage readings to calibrated OD values during experiments.
 """
 
-import argparse
 import datetime
 import logging
 import os
@@ -25,6 +24,7 @@ import sys
 import numpy as np
 from scipy.optimize import curve_fit
 
+from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
@@ -54,50 +54,8 @@ stream_handler.setFormatter(stream_formatter)
 # Use the calibration logger for this module
 logger = calibration_logger
 
-
 DEFAULT_VIALS_OD = list(range(18))
-DEFAULT_NUM_STANDARDS: int = 18
 STANDARD_NUM_MIN: int = 3
-
-
-def get_options():
-    description = "Run an eVOLVER experiment from the command line"
-    parser = argparse.ArgumentParser(description=description)
-
-    parser.add_argument(
-        "-i",
-        "--ip_address",
-        action="store",
-        required=True,
-        help="IP address of eVOLVER to run experiment on.",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--standard_number",
-        action="store",
-        required=True,
-        help="Number of standards to use, defaults to using 18",
-    )
-
-    parser.add_argument(
-        "-q",
-        "--stations",
-        action="store",
-        nargs="*",
-        type=lambda s: int(s),
-        required=False,
-        help="List of Smart Stations to iterate calibration protocol over (space separated), defaults to all if left blank",
-    )
-    parser.add_argument(
-        "-f",
-        "--file",
-        action="store",
-        required=False,
-        help="Filename that contains serialized CalibrationData representing an incomplete calibration procedure.",
-    )
-
-    return parser.parse_args(), parser
 
 
 def collect_od_data(
@@ -252,16 +210,11 @@ def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -
 if __name__ == "__main__":
     options, parser = get_options()
     evolver_ip = options.ip_address
+    station_list: list[int] = options.stations
 
-    if int(options.standard_number) < STANDARD_NUM_MIN:
+    if options.standard_number < STANDARD_NUM_MIN:
         logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
-
-    station_list: list[int] = []
-    if options.stations != []:
-        station_list = options.stations
-    else:
-        station_list = [0, 1, 2, 3]
 
     htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
 

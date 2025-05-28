@@ -1,43 +1,17 @@
-import argparse
 import logging
-import os
 
 import numpy as np
 
+from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
 logger = logging.getLogger(__name__)
 
 
-def get_options():
-    description = "Run an eVOLVER experiment from the command line"
-    parser = argparse.ArgumentParser(description=description)
-
-    parser.add_argument(
-        "-f",
-        "--calibration_file",
-        action="store",
-        required=True,
-        help="Enter the absolute path of the calibration json data",
-    )
-
-    parser.add_argument(
-        "-q",
-        "--stations",
-        action="store",
-        nargs="*",
-        type=lambda s: int(s),
-        required=False,
-        help="List of Smart Stations to iterate calibration protocol over (space separated), defaults to all if left blank",
-    )
-
-    return parser.parse_args(), parser
-
-
 if __name__ == "__main__":
     options, parser = get_options()
 
-    data_filepath = os.path.abspath(options.calibration_file)
+    data_filepath = options.calibration_file
     calibration_data = CalibrationData.from_file(data_filepath)
     calibration_type = ""
 

@@ -21,7 +21,6 @@ The calibration data is also sent to the server for storage and later use by the
 to convert raw voltage readings to calibrated temperature values during experiments.
 """
 
-import argparse
 import datetime
 import logging
 import os
@@ -30,6 +29,7 @@ import sys
 import numpy as np
 from scipy.optimize import curve_fit
 
+from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
@@ -64,47 +64,6 @@ MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
 MAX_TEMP = 1500
 MIN_TEMP = 2500
 STANDARD_NUM_MIN = 2
-
-
-def get_options():
-    description = "Run an eVOLVER experiment from the command line"
-    parser = argparse.ArgumentParser(description=description)
-
-    parser.add_argument(
-        "-i",
-        "--ip_address",
-        action="store",
-        required=True,
-        help="IP address of eVOLVER to run experiment on.",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--standard_number",
-        action="store",
-        required=True,
-        help="Number of standards to use, defaults to using 18",
-    )
-
-    parser.add_argument(
-        "-q",
-        "--stations",
-        action="store",
-        nargs="*",
-        type=lambda s: int(s),
-        required=False,
-        help="List of Smart Stations to iterate calibration protocol over (space separated), defaults to all if left blank",
-    )
-
-    parser.add_argument(
-        "-f",
-        "--file",
-        action="store",
-        required=False,
-        help="Filename that contains serialized CalibrationData representing an incomplete calibration procedure.",
-    )
-
-    return parser.parse_args(), parser
 
 
 def save_procedure(): ...
@@ -328,7 +287,7 @@ if __name__ == "__main__":
     options, parser = get_options()
     evolver_ip = options.ip_address
 
-    if int(options.standard_number) < STANDARD_NUM_MIN:
+    if options.standard_number < STANDARD_NUM_MIN:
         logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 

@@ -29,6 +29,7 @@ logging.getLogger("socketio.client").setLevel(logging.ERROR)
 logging.getLogger("aiohttp").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("asyncio").setLevel(logging.ERROR)
+logging.getLogger("tecancavro").setLevel(logging.ERROR)
 
 
 async def shutdown(app):
