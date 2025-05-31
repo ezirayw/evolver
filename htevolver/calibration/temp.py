@@ -32,6 +32,13 @@ from scipy.optimize import curve_fit
 from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
+from htevolver.htevolver_server.server import LOGGING_DIR
+
+# Constants
+MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
+MAX_TEMP = 1500
+MIN_TEMP = 2500
+STANDARD_NUM_MIN = 2
 
 # Configure client logger (logs to file)
 client_logger = logging.getLogger("htevolver.htevolver_client")
@@ -42,7 +49,7 @@ calibration_logger.setLevel(logging.INFO)
 client_logger.setLevel(logging.INFO)
 
 # Create handlers
-file_handler = logging.FileHandler("/home/pi/logs/calibrate_temp.log")
+file_handler = logging.FileHandler(os.path.join(LOGGING_DIR, "calibrate_temp.log"))
 file_handler.setLevel(logging.INFO)
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setLevel(logging.INFO)
@@ -58,12 +65,6 @@ stream_handler.setFormatter(stream_formatter)
 
 # Use the calibration logger for this module
 logger = calibration_logger
-
-# Constants
-MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
-MAX_TEMP = 1500
-MIN_TEMP = 2500
-STANDARD_NUM_MIN = 2
 
 
 def save_procedure(): ...
