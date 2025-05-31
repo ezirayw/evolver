@@ -23,7 +23,7 @@ classifiers = [
 
 
 [tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
+dependencies = { file = ["./dependencies/requirements.txt"] }
 
 [project.urls]
 Repository = "https://github.com/ezirayw/evolver"

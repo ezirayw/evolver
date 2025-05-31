@@ -12,24 +12,29 @@ from aiohttp.web_app import Application
 from htevolver.htevolver_server.evolver_namespace_server import EvolverServerNamespace
 from htevolver.htevolver_server.robotics_namespace_server import RoboticsServerNamespace
 
-EVOLVER_CONF_FILENAME = "evolver_conf.yml"
-ROBOTICS_CONF_FILENAME = "robotics_conf.yml"
+EVOLVER_CONF_FILENAME: str = "evolver_conf.yml"
+ROBOTICS_CONF_FILENAME: str = "robotics_conf.yml"
+LOGGING_DIR: str = "/home/pi/logs"
 
 logger = logging.getLogger("htevolver")
 logger.setLevel(logging.INFO)
 
-file_handler = logging.FileHandler("/home/pi/logs/htevolver.log")
-file_handler.setLevel(logging.INFO)
-logger.addHandler(file_handler)
-file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-file_handler.setFormatter(file_formatter)
 
-logging.getLogger("engineio.client").setLevel(logging.ERROR)
-logging.getLogger("socketio.client").setLevel(logging.ERROR)
-logging.getLogger("aiohttp").setLevel(logging.ERROR)
-logging.getLogger("urllib3").setLevel(logging.ERROR)
-logging.getLogger("asyncio").setLevel(logging.ERROR)
-logging.getLogger("tecancavro").setLevel(logging.ERROR)
+def setup_logging(log_dir: str = LOGGING_DIR):
+    os.makedirs(log_dir, exist_ok=True)
+
+    file_handler = logging.FileHandler(os.path.join(log_dir, "htevolver.log"))
+    file_handler.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    file_formatter = logging.Formatter(fmt="%(asctime)s - %(name)s - [%(levelname)s] - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    file_handler.setFormatter(file_formatter)
+
+    logging.getLogger("engineio.client").setLevel(logging.ERROR)
+    logging.getLogger("socketio.client").setLevel(logging.ERROR)
+    logging.getLogger("aiohttp").setLevel(logging.ERROR)
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
+    logging.getLogger("asyncio").setLevel(logging.ERROR)
+    logging.getLogger("tecancavro").setLevel(logging.ERROR)
 
 
 async def shutdown(app):
@@ -181,6 +186,7 @@ def init() -> web.Application:
 
 
 def main():
+    setup_logging()
     app = init()
     logger.info(f"Starting HT-eVOLVER server on port {app['port']}")
     web.run_app(app, port=app["port"])

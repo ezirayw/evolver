@@ -33,7 +33,7 @@ scipy==1.15.2
 simple-websocket==1.1.0
 six==1.17.0
 tifffile==2025.3.30
-websocket-client   1.8.0
+websocket-client==1.8.0
 wsproto==1.2.0
 xarm-python-sdk==1.15.3
 yarl==1.20.0
