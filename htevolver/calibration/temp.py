@@ -32,13 +32,13 @@ from scipy.optimize import curve_fit
 from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
-from htevolver.htevolver_server.server import LOGGING_DIR
 
 # Constants
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
 MAX_TEMP = 1500
 MIN_TEMP = 2500
 STANDARD_NUM_MIN = 2
+LOGGING_DIR: str = "/home/pi/logs"
 
 # Configure client logger (logs to file)
 client_logger = logging.getLogger("htevolver.htevolver_client")

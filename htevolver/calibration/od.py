@@ -27,10 +27,10 @@ from scipy.optimize import curve_fit
 from htevolver.calibration.calibration_cli import get_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
-from htevolver.htevolver_server.server import LOGGING_DIR
 
 DEFAULT_VIALS_OD = list(range(18))
 STANDARD_NUM_MIN: int = 3
+LOGGING_DIR: str = "/home/pi/logs"
 
 # Configure client logger (logs to file)
 client_logger = logging.getLogger("htevolver.htevolver_client")
