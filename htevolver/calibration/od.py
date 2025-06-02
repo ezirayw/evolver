@@ -119,7 +119,7 @@ def collect_od_data(
         )
 
     logger.info(
-        f"\nPlace standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]}OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]}OD600 in vial_slot: {max(standards_mask)}."
+        f"\nPlace standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(standards_mask)}."
     )
     while True:
         proceed = input("Ready to continue? [y/n]: ")
@@ -153,7 +153,7 @@ def collect_od_data(
         logger.info(
             f"Done collecting voltage photodiode data, calculating and storing median values for calibration procedure step: {step_num}/{len(vial_list) - 1}"
         )
-        logger.info("Rearrange standards by moving up one position and snaking highest standard index to lowest vial position.")
+        logger.info("\nRearrange standards by moving up one position and snaking highest standard index to lowest vial position.")
         while True:
             proceed = input("Ready to continue? [y/n]: ")
             if proceed == "y":
@@ -255,8 +255,9 @@ if __name__ == "__main__":
         final_calibration_data = fit_data(collected_calibration_data, True)
 
         # Send calibration data to server for long-term storage
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        logger.info(final_calibration_data)
         serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         htevolver_client.evolver.send_calibration(
             serialized_calibration_data, metadata={"parameter": "od", "timestamp": timestamp, "station_id": station_id}
         )

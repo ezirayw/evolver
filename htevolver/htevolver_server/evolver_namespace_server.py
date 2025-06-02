@@ -164,6 +164,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         self.running_broadcast: bool = False
 
         self.calibration_directory: str = evolver_conf["calibration_directory"]
+        self.calibration_cache_directory: str = evolver_conf["calibration_cache_directory"]
         self.serial_connection: serial.Serial = serial.Serial(
             port=self.evolver_conf["serial_port"],
             baudrate=self.evolver_conf["serial_baudrate"],
@@ -172,10 +173,12 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         EvolverCommand.extract_parameter_info(self.evolver_conf["parameters"])
 
         os.makedirs(self.calibration_directory, exist_ok=True)
-        temp_dir = os.path.join(self.calibration_directory, "temp")
-        od_dir = os.path.join(self.calibration_directory, "od")
-        os.makedirs(temp_dir, exist_ok=True)
-        os.makedirs(od_dir, exist_ok=True)
+        os.makedirs(self.calibration_cache_directory, exist_ok=True)
+        for station_id in range(4):
+            temp_dir = os.path.join(self.calibration_directory, f"station_{station_id}", "temp")
+            od_dir = os.path.join(self.calibration_directory, f"station_{station_id}", "od")
+            os.makedirs(temp_dir, exist_ok=True)
+            os.makedirs(od_dir, exist_ok=True)
 
         logger.info("eVOLVER namespace initialized")
 

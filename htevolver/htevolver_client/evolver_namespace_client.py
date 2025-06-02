@@ -216,10 +216,10 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             self.stations[station_id] = SmartStationClient.create(station_id, data_buffer_size)
 
         self.evolver_conf = {}
-        self.request_conf()
 
     def on_connect(self):
         """Handle connection to the server."""
+        self.request_conf()
         logger.info("Client connected to HTeVOVLER server via eVOLVER namespace")
 
     def on_disconnect(self, *args):
