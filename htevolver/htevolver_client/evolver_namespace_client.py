@@ -309,8 +309,10 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             ...     {"station_id": 0, "parameter": "temp", "timestamp": "2025-04-13_04-07-12"}
             ... )
         """
-        logger.info(f"Sending recently generated calibration data for Smart Station {metadata['station_id']}.")
         self.emit("get_calibration", {"data": serialized_calibration_data, "metadata": metadata})
+        logger.info(
+            f"Recently generated {metadata['parameter']} calibration data for Smart Station {metadata['station_id']} sent to server."
+        )
 
     def save_data(self):
         """Save the current sensor data to disk.

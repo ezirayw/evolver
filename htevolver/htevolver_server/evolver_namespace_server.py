@@ -345,7 +345,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         station_id = new_calibration_data["metadata"]["station_id"]
 
         filename = os.path.join(
-            self.calibration_directory, station_id, parameter, f"calibration_data_{parameter}_{timestamp}.json"
+            self.calibration_directory, f"station_{station_id}", parameter, f"calibration_data_{parameter}_{timestamp}.json"
         )
         CalibrationData.to_file(filename, new_calibration_data["data"])
         logger.info("Finished processing calibration data, saved to memory.")

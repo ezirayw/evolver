@@ -24,7 +24,7 @@ class CalibrationData:
         coefficients (np.ndarray): Curve fit coefficients for the calibration.
         standard_deviation (np.ndarray): Array of standard deviations for voltage readings.
         complete: (bool) = Whether the calibration process is complete.
-        step_num: (int) = Current calibration step number or progress indicator.
+        step_num: (int) = Current calibration step number or progress indicator, if calibration is incomplete.
         settings: (dict) = Additional calibration settings or configuration parameters.
     """
 
@@ -216,7 +216,7 @@ class CalibrationData:
         return cls.from_dict(deserialize_data)
 
     @classmethod
-    def save_calibration(cls, temporary_calibration_data: dict[int, "CalibrationData"], calibration_directory: str, type: str):
+    def save_calibration(cls, temporary_calibration_data: dict[str, "CalibrationData"], calibration_directory: str, type: str):
         logger.info("Backing up current state of calibration.")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = os.path.join(calibration_directory, f"calibration_data_{type}_{timestamp}_INCOMPLETE.json")
@@ -253,7 +253,7 @@ class GraphCalibration:
     start: int = field(default=0)
     sample_num: int = field(default=500)
 
-    def graph(self, func: Callable, calibration_data: dict[int, CalibrationData]):
+    def graph(self, func: Callable, calibration_data: dict[str, CalibrationData]):
         """Generate calibration graphs for the provided data.
 
         Creates a grid of subplots, each showing a calibration curve for one object

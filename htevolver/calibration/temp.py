@@ -109,7 +109,7 @@ def collect_temperature_measurements(station_list: list[int]):
 
 def collect_temp_data(
     htevolver_client: HTEvolverClient, station_list: list[int], num_standards: int
-) -> dict[int, CalibrationData]:
+) -> dict[str, CalibrationData]:
     """Collect temperature calibration data for specified stations.
 
     Guides the user through the temperature calibration procedure, which includes:
@@ -131,8 +131,8 @@ def collect_temp_data(
         >>> calibration_data = collect_temp_data(client, [0, 1], 3)
     """
     # initialize data structures
-    calibration_data: dict[int, CalibrationData] = {
-        station_id: CalibrationData(
+    calibration_data: dict[str, CalibrationData] = {
+        f"station_{station_id}": CalibrationData(
             voltage=np.zeros((num_standards * 2) + 3),
             standards=np.zeros((num_standards * 2) + 3),
             standard_deviation=np.zeros((num_standards * 2) + 3),
@@ -167,9 +167,10 @@ def collect_temp_data(
 
     logger.info("Storing room temperature voltage and Celsius data.")
     for station_id in station_list:
-        calibration_data[station_id].voltage[room_temp_step_num] = np.nanmedian(voltage_triplets[station_id])
-        calibration_data[station_id].standard_deviation[room_temp_step_num] = np.std(voltage_triplets[station_id], dtype=float)
-        calibration_data[station_id].standards[room_temp_step_num] = np.mean(temperature_measurements[station_id])
+        station_key = f"station_{station_id}"
+        calibration_data[station_key].voltage[room_temp_step_num] = np.nanmedian(voltage_triplets[station_id])
+        calibration_data[station_key].standard_deviation[room_temp_step_num] = np.std(voltage_triplets[station_id], dtype=float)
+        calibration_data[station_key].standards[room_temp_step_num] = np.mean(temperature_measurements[station_id])
 
     CalibrationData.save_calibration(
         calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
@@ -177,8 +178,10 @@ def collect_temp_data(
 
     logger.info("Auto-calculating calibration setpoints based on number of temperature standards inputs.")
     for station_id in station_list:
+        station_key = f"station_{station_id}"
+
         # Calculate step size for temperature values above room temperature
-        room_temp_voltage = calibration_data[station_id].voltage[room_temp_step_num]
+        room_temp_voltage = calibration_data[station_key].voltage[room_temp_step_num]
 
         # Create list for setpoints above room temperature
         above_rt = []
@@ -197,8 +200,8 @@ def collect_temp_data(
             below_rt.append(temp_value)
 
         # Combine both lists and convert to integers
-        calibration_data[station_id].settings["setpoints"] = [int(temp) for temp in above_rt + below_rt]
-        logger.info(f"Setpoints for Smart Station {station_id}: {calibration_data[station_id].settings['setpoints']} ")
+        calibration_data[station_key].settings["setpoints"] = [int(temp) for temp in above_rt + below_rt]
+        logger.info(f"Setpoints for Smart Station {station_id}: {calibration_data[station_key].settings['setpoints']} ")
 
     # Loop through all temperature setpoints
     for step_num in range(calibration_steps):
@@ -210,7 +213,7 @@ def collect_temp_data(
         # Set uncalibrated temperature for each station
         temp_commands = [0] * 4
         for station_id in station_list:
-            temp_commands[station_id] = calibration_data[station_id].settings["setpoints"][step_num]
+            temp_commands[station_id] = calibration_data[f"station_{station_id}"].settings["setpoints"][step_num]
         logger.info(f"Sending setpoints: {temp_commands} to HT-eVOLVER...")
         htevolver_client.evolver.send_command("temp", temp_commands, immediate=True, recurring=True)
 
@@ -230,22 +233,23 @@ def collect_temp_data(
         # Store data for this temperature point
         logger.info("Done collecting temperature data, calculating and storing median values for calibration procedure step")
         for station_id in station_list:
-            calibration_data[station_id].voltage[step_num] = np.nanmedian(voltage_triplets[station_id])
-            calibration_data[station_id].standard_deviation[step_num] = np.std(voltage_triplets[station_id], dtype=float)
-            calibration_data[station_id].standards[step_num] = np.mean(temperature_measurements[station_id])
-            calibration_data[station_id].step_num = step_num
+            station_key = f"station_{station_id}"
+            calibration_data[station_key].voltage[step_num] = np.nanmedian(voltage_triplets[station_id])
+            calibration_data[station_key].standard_deviation[step_num] = np.std(voltage_triplets[station_id], dtype=float)
+            calibration_data[station_key].standards[step_num] = np.mean(temperature_measurements[station_id])
+            calibration_data[station_key].step_num = step_num
 
     CalibrationData.save_calibration(
         calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
     )
 
     for station_id in station_list:
-        calibration_data[station_id].complete = True
+        calibration_data[f"station_{station_id}"].complete = True
 
     return calibration_data
 
 
-def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -> dict[int, CalibrationData]:
+def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -> dict[str, CalibrationData]:
     """Fit linear curves to the collected temperature calibration data.
 
     Fits a linear function to the relationship between temperature standards and voltage readings,

@@ -61,7 +61,7 @@ logger = calibration_logger
 
 def collect_od_data(
     htevolver_client: HTEvolverClient, vial_list: list[int], station_id: int, num_standards: int
-) -> dict[int, CalibrationData]:
+) -> dict[str, CalibrationData]:
     """Collect optical density calibration data for a station.
 
     Guides the user through placing standards in vials and collects voltage readings.
@@ -109,17 +109,18 @@ def collect_od_data(
         standards[index] = standard_input
 
     # initialize data structures
-    calibration_data: dict[int, CalibrationData] = {}
+    calibration_data: dict[str, CalibrationData] = {}
     for vial_id in vial_list:
-        calibration_data[vial_id] = CalibrationData(
+        calibration_data[f"vial_{vial_id}"] = CalibrationData(
             voltage=np.zeros(num_standards),
             standards=standards,
             standard_deviation=np.zeros(num_standards),
             coefficients=np.zeros(4),
         )
 
+    logger.info("\nPlace standards in Smart Station vial slots in ascending order according to vial list entered.")
     logger.info(
-        f"\nPlace standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(standards_mask)}."
+        f"Example, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(standards_mask)}."
     )
     while True:
         proceed = input("Ready to continue? [y/n]: ")
@@ -136,14 +137,15 @@ def collect_od_data(
         logger.info("Done collecting new photodiode voltage readings, processing data now... ")
 
         # triplet data is collected, store median representative voltage value
-        for vial_id in calibration_data:
+        for vial_id in vial_list:
             if not np.isnan(standards_mask[vial_id]):
+                vial_key = f"vial_{vial_id}"
                 data_index = standards_mask[vial_id]
-                calibration_data[vial_id].voltage[data_index] = np.nanmedian(voltage_triplets[station_id][vial_id])
-                calibration_data[vial_id].standard_deviation[data_index] = np.std(
+                calibration_data[vial_key].voltage[data_index] = np.nanmedian(voltage_triplets[station_id][vial_id])
+                calibration_data[vial_key].standard_deviation[data_index] = np.std(
                     voltage_triplets[station_id][vial_id], dtype=float
                 )
-                calibration_data[vial_id].step_num = step_num
+                calibration_data[vial_key].step_num = step_num
 
         CalibrationData.save_calibration(
             calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "od"
@@ -161,10 +163,10 @@ def collect_od_data(
             if proceed == "y":
                 break
 
-        logger.info(f"\nCurrent state of standards mask: {standards_mask}")
-        logger.info("Current state of calibration_data structure")
+        logger.debug(f"\nCurrent state of standards mask: {standards_mask}")
+        logger.debug("Current state of calibration_data structure")
         for vial in calibration_data:
-            logger.info(calibration_data[vial])
+            logger.debug(calibration_data[vial])
 
         # adjust standards_mask for next step
         standards_mask.insert(0, standards_mask.pop())
@@ -175,7 +177,7 @@ def collect_od_data(
     return calibration_data
 
 
-def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -> dict[int, CalibrationData]:
+def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -> dict[str, CalibrationData]:
     """Fit sigmoid curves to the collected calibration data.
 
     Fits a sigmoid function to the relationship between OD standards and voltage readings,
@@ -194,10 +196,9 @@ def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -
         >>> fitted_data = fit_data(calibration_data)
     """
     logger.info("\nGenerating sigmoid fit for collected OD data...")
-    for vial_id, vial_calibration in calibration_data.items():
+    for vial_key, vial_calibration in calibration_data.items():
         # p0 = [62721, 62721, 0, -1]
         # maxfev=1000000000
-        logger.info(calibration_data[vial_id])
         coefficients, cov = curve_fit(
             CalibrationData.sigmoid,
             vial_calibration.standards,
@@ -208,7 +209,7 @@ def fit_data(calibration_data: dict[int, CalibrationData], graph: bool = True) -
     if graph:
         logger.info("Preparing calibration fit plots...")
         # calculate the highest value recorded during the calibration for the graph settings
-        max_values = np.array([np.max(calibration_data[vial_id].voltage) for vial_id in calibration_data])
+        max_values = np.array([np.max(calibration_data[vial_key].voltage) for vial_key in calibration_data])
         max_value = np.max(max_values)
         grapher = GraphCalibration(
             container_type="vial",
