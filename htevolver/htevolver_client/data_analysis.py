@@ -1,5 +1,7 @@
+import datetime
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -21,6 +23,9 @@ class CalibrationData:
         standards (np.ndarray): Array of reference measurement values.
         coefficients (np.ndarray): Curve fit coefficients for the calibration.
         standard_deviation (np.ndarray): Array of standard deviations for voltage readings.
+        complete: (bool) = Whether the calibration process is complete.
+        step_num: (int) = Current calibration step number or progress indicator.
+        settings: (dict) = Additional calibration settings or configuration parameters.
     """
 
     voltage: np.ndarray
@@ -28,6 +33,8 @@ class CalibrationData:
     coefficients: np.ndarray
     standard_deviation: np.ndarray
     complete: bool = field(default=False)
+    step_num: int = field(default=0)
+    settings: dict = field(default_factory=dict)
 
     @staticmethod
     def sigmoid(x: int | float, a: float, b: float, c: float, d: float) -> float:
@@ -198,6 +205,17 @@ class CalibrationData:
         with open(filename, "r") as f:
             deserialize_data = json.load(f)
         return CalibrationData.from_dict(deserialize_data)
+
+    @classmethod
+    def save_calibration(cls, temporary_calibration_data: dict[int, "CalibrationData"], calibration_directory: str, type: str):
+        logger.info("Backing up current state of calibration.")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = os.path.join(calibration_directory, f"calibration_data_{type}_{timestamp}_INCOMPLETE.json")
+        current_calibration_state = cls.to_json(temporary_calibration_data)
+        cls.to_file(filename, current_calibration_state)
+
+    @classmethod
+    def from_save(cls): ...
 
 
 @dataclass

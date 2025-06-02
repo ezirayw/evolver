@@ -36,11 +36,12 @@ def get_options():
         help="List of Smart Stations to iterate calibration protocol over (space separated).",
         default=DEFAULT_STATION_LIST,
     )
+
     parser.add_argument(
         "-f",
         "--file",
         action="store",
-        type=argparse.FileType,
+        type=argparse.FileType("r"),
         required=False,
         help="Filename that contains serialized CalibrationData representing an incomplete calibration procedure.",
     )
