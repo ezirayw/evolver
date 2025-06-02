@@ -118,7 +118,8 @@ def collect_od_data(
             coefficients=np.zeros(4),
         )
 
-    logger.info("\nPlace standards in Smart Station vial slots in ascending order according to vial list entered.")
+    print("\n")
+    logger.info("Place standards in Smart Station vial slots in ascending order according to vial list entered.")
     logger.info(
         f"Example, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(standards_mask)}."
     )
@@ -129,7 +130,8 @@ def collect_od_data(
 
     # enter loop which will store the median of 3 broadcast readings and instruct the user to rearrange standards
     for step_num in range(len(vial_list)):
-        logger.info(f"\n---- Starting OD calibration procedure step: {step_num}/{len(vial_list) - 1} ----")
+        print("\n")
+        logger.info(f"---- Starting OD calibration procedure step: {step_num}/{len(vial_list) - 1} ----")
         logger.info("Collecting photodiode voltage readings, do not move vials or exit. Should take about a minute...")
 
         # Use the generalized collect_voltage_readings function
@@ -156,14 +158,14 @@ def collect_od_data(
             f"Done collecting voltage photodiode data, calculating and storing median values for calibration procedure step: {step_num}/{len(vial_list) - 1}"
         )
         logger.info(
-            "\nRearrange standards by moving up them up one position and snaking the standard in the highest vial position the to the lowest position."
+            "Rearrange standards by moving up them up one position and snaking the standard in the highest vial position the to the lowest position."
         )
         while True:
             proceed = input("Ready to continue? [y/n]: ")
             if proceed == "y":
                 break
 
-        logger.debug(f"\nCurrent state of standards mask: {standards_mask}")
+        logger.debug(f"Current state of standards mask: {standards_mask}")
         logger.debug("Current state of calibration_data structure")
         for vial in calibration_data:
             logger.debug(calibration_data[vial])
@@ -195,7 +197,8 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
         >>> calibration_data = collect_od_data(client, [0, 1, 2, 3], 0, 5)
         >>> fitted_data = fit_data(calibration_data)
     """
-    logger.info("\nGenerating sigmoid fit for collected OD data...")
+    print("\n")
+    logger.info("Generating sigmoid fit for collected OD data...")
     for vial_key, vial_calibration in calibration_data.items():
         # p0 = [62721, 62721, 0, -1]
         # maxfev=1000000000

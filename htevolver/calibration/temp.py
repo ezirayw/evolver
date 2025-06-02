@@ -88,7 +88,8 @@ def collect_temperature_measurements(station_list: list[int]):
 
     for station_id in station_list:
         temperature_input = None
-        logger.info(f"\nMeasure vial temperatures for Smart Station:{station_id} with probe to generate temperature standards")
+        print("\n")
+        logger.info(f"Measure vial temperatures for Smart Station:{station_id} with probe to generate temperature standards")
         for position_index, vial_position in enumerate(MEASURE_VIALS):
             while True:
                 try:
@@ -133,16 +134,15 @@ def collect_temp_data(
     # initialize data structures
     calibration_data: dict[str, CalibrationData] = {
         f"station_{station_id}": CalibrationData(
-            voltage=np.zeros((num_standards * 2) + 3),
-            standards=np.zeros((num_standards * 2) + 3),
-            standard_deviation=np.zeros((num_standards * 2) + 3),
+            voltage=np.zeros(num_standards),
+            standards=np.zeros(num_standards),
+            standard_deviation=np.zeros(num_standards),
             coefficients=np.zeros(2),
             complete=False,
             settings={"station_list": station_list, "num_standards": num_standards},
         )
         for station_id in station_list
     }
-    calibration_steps = (num_standards * 2) + 3
 
     # Prepare for room temperature measurements
     for station_id in station_list:
@@ -151,7 +151,8 @@ def collect_temp_data(
             proceed = input("Ready to continue? [y/n]: ")
             if proceed == "y":
                 break
-
+    print("\n")
+    logger.info("---- Starting room temperature step ----")
     logger.info("Wait for 30-60 mins to allow for room temperature equilibration...")
     while True:
         proceed = input("Ready to continue? [y/n]: ")
@@ -159,7 +160,7 @@ def collect_temp_data(
             break
 
     # Room temperature step
-    room_temp_step_num = int(np.floor(calibration_steps / 2))
+    room_temp_step_num = int(np.ceil(num_standards / 2))
     logger.info("Collecting room temperature voltage readings, do not move vials or exit. Should take about a minute...")
     voltage_triplets = htevolver_client.get_new_temp(station_list)
     logger.info("Done collecting room temperature voltage readings. Prepare to take temperature readings from vials.")
@@ -182,33 +183,31 @@ def collect_temp_data(
 
         # Calculate step size for temperature values above room temperature
         room_temp_voltage = calibration_data[station_key].voltage[room_temp_step_num]
-
+        num_additional_setpoints = num_standards - 3
         # Create list for setpoints above room temperature
-        above_rt = []
-        above_rt_step = (MAX_TEMP - room_temp_voltage) / (num_standards + 1)
-        for i in range(num_standards + 1):
-            temp_value = round(MAX_TEMP - (i * above_rt_step))
-            above_rt.append(temp_value)
-        # Remove room temperature from above_rt (last element)
-        above_rt = above_rt[:-1]
+        calibration_data[station_key].settings["setpoints"] = []
+        calibration_data[station_key].settings["setpoints"].append(MIN_TEMP)
 
-        # Create list for setpoints below room temperature
-        below_rt = []
-        below_rt_step = (MIN_TEMP - room_temp_voltage) / (num_standards + 1)
-        for i in range(num_standards + 2):
-            temp_value = round(room_temp_voltage + (i * below_rt_step))
-            below_rt.append(temp_value)
+        below_rt_step = (MIN_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
+        above_rt_step = (MAX_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
+        for i in range(int(num_additional_setpoints / 2)):
+            calibration_data[station_key].settings["setpoints"].append(MIN_TEMP - (i * below_rt_step))
+        calibration_data[station_key].settings["setpoints"].append(room_temp_voltage)
+
+        for i in range(int(num_additional_setpoints / 2)):
+            calibration_data[station_key].settings["setpoints"].append(MAX_TEMP + (i * above_rt_step))
+        calibration_data[station_key].settings["setpoints"].append(MAX_TEMP)
 
         # Combine both lists and convert to integers
-        calibration_data[station_key].settings["setpoints"] = [int(temp) for temp in above_rt + below_rt]
         logger.info(f"Setpoints for Smart Station {station_id}: {calibration_data[station_key].settings['setpoints']} ")
 
     # Loop through all temperature setpoints
-    for step_num in range(calibration_steps):
+    for step_num in range(num_standards):
         # Skip room temperature setpoint since we already have it
         if step_num == room_temp_step_num:
             continue
-        logger.info(f"\n---- Starting temperature sweep step: {step_num}/{calibration_steps - 1} ----")
+        print("\n")
+        logger.info(f"---- Starting temperature sweep step: {step_num}/{num_standards - 1} ----")
 
         # Set uncalibrated temperature for each station
         temp_commands = [0] * 4
@@ -267,9 +266,8 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
         >>> calibration_data = collect_temp_data(client, [0, 1], 3)
         >>> fitted_data = fit_data(calibration_data)
     """
-
-    logger.info("\nGenerating linear fit for collected Temperature data...")
-
+    print("\n")
+    logger.info("Generating linear fit for collected Temperature data...")
     for station_id in calibration_data:
         coefficients, cov = curve_fit(
             CalibrationData.linear, calibration_data[station_id].standards, calibration_data[station_id].voltage
