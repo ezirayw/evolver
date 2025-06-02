@@ -96,9 +96,8 @@ def collect_temperature_measurements(station_list: list[int]):
                         input(f"Enter temperature (C) value for vial slot {vial_position} in Smart Station:{station_id}: ")
                     )
                     if temperature_input >= 0 and temperature_input <= 100:
-                        logger.info(f"Entered value is {temperature_input}.")
-                        validation = input("Press the ENTER key to commit this value or type 'return' to re-enter a temperature:")
-                        if validation == "":
+                        validation = input(f"Entered value is {temperature_input}. Do you want to commit this value? [y/n]: ")
+                        if validation == "y":
                             break
 
                 except ValueError:
@@ -147,16 +146,16 @@ def collect_temp_data(
 
     # Prepare for room temperature measurements
     for station_id in station_list:
+        logger.info(f"Place vials filled with 6mL of water in all vial slots in Smart Station:{station_id}.")
         while True:
-            logger.info(f"Place vials filled with 6mL of water in all vial slots in Smart Station:{station_id}.")
-            proceed = input("Press the ENTER key to continue.")
-            if proceed == "":
+            proceed = input("Ready to continue? [y/n]: ")
+            if proceed == "y":
                 break
 
+    logger.info("Wait for 30-60 mins to allow for room temperature equilibration...")
     while True:
-        logger.info("Wait for 30 mins to allow for room temperature equilibration...")
-        proceed = input("Press the ENTER key to continue:")
-        if proceed == "":
+        proceed = input("Ready to continue? [y/n]: ")
+        if proceed == "y":
             break
 
     # Room temperature step
@@ -216,8 +215,8 @@ def collect_temp_data(
         # Wait for equilibration
         logger.info("Wait for 30-60 mins to allow for heat equilibration...")
         while True:
-            proceed = input("Press the ENTER key to continue:")
-            if proceed == "":
+            proceed = input("Ready to continue? [y/n]: ")
+            if proceed == "y":
                 break
 
         logger.info(f"Temperature readings voltage readings starting for {step_num}, do not move vials or exit...")

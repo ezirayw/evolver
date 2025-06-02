@@ -96,11 +96,14 @@ def collect_od_data(
     logger.info("\nEnsure that OD standards are prepared before continuing")
     for index in range(len(standards)):
         standard_input = None
+
         while True:
             try:
                 standard_input = float(input(f"Enter OD value for standard_{index}: "))
                 if standard_input >= 0:
-                    break
+                    validation = input(f"Entered value is {standard_input}. Do you want to commit this value? [y/n]: ")
+                    if validation == "y":
+                        break
             except ValueError:
                 logger.info("Input a valid float number")
         standards[index] = standard_input
@@ -115,12 +118,12 @@ def collect_od_data(
             coefficients=np.zeros(4),
         )
 
+    logger.info(
+        f"Place standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]}OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]}OD600 in vial_slot: {max(standards_mask)}."
+    )
     while True:
-        logger.info(
-            f"Place standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]}OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]}OD600 in vial_slot: {max(standards_mask)}."
-        )
-        proceed = input("Press the ENTER key to start procedure:")
-        if proceed == "":
+        proceed = input("Ready to continue? [y/n]: ")
+        if proceed == "y":
             break
 
     # enter loop which will store the median of 3 broadcast readings and instruct the user to rearrange standards
@@ -148,12 +151,10 @@ def collect_od_data(
         logger.info(
             f"Done collecting voltage photodiode data, calculating and storing median values for calibration procedure step: {step_num}/{len(vial_list) - 1}"
         )
+        logger.info("Rearrange standards by moving up one position and snaking highest standard index to lowest vial position.")
         while True:
-            logger.info(
-                "Rearrange standards by moving up one position and snaking highest standard index to lowest vial position."
-            )
-            proceed = input("Press the ENTER key when done:")
-            if proceed == "":
+            proceed = input("Ready to continue? [y/n]: ")
+            if proceed == "y":
                 break
 
         logger.info(f"\nCurrent state of standards mask: {standards_mask}")
@@ -237,10 +238,9 @@ if __name__ == "__main__":
     for station_id in station_list:
         vial_list: list[int] = []
         while True:
-            logger.info(
-                f"\nEnter space-separated list of vials to calibrate for Smart Station:{station_id} OR leave empty to use all 18."
+            vials = input(
+                f"\nInput a space-separated list of vials to calibrate for Smart Station:{station_id} OR leave empty to use all 18: "
             )
-            vials = input("Press the ENTER key to continue:")
             if vials == "":
                 vial_list = DEFAULT_VIALS_OD
                 break
