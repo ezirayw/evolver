@@ -299,17 +299,17 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         Transmits calibration data to the server for storage.
 
         Args:
-            parameter (str): Type of calibration data ("od" or "temp").
-            calibration_data (dict): Calibration data to send.
-            timestamp (str): Timestamp to associate with the calibration data.
+            serialized_calibration_data (dict): Serialized calibration data to send to the server.
+            metadata (dict): Dictionary containing information describing the calibration data,
+                such as station_id, parameter type, and timestamp.
 
         Examples:
             >>> evolver_ns.send_calibration(
-            ...     "temp",
-            ...     {0: {"voltage": [...], "standards": [...], "coefficients": [...], "standard_deviation": [...]}},
-            ...     "2025-04-13_04-07-12"
+            ...     {"voltage": [...], "standards": [...], "coefficients": [...], "standard_deviation": [...]},
+            ...     {"station_id": 0, "parameter": "temp", "timestamp": "2025-04-13_04-07-12"}
             ... )
         """
+        logger.info(f"Sending recently generated calibration data for Smart Station {metadata['station_id']}.")
         self.emit("get_calibration", {"data": serialized_calibration_data, "metadata": metadata})
 
     def save_data(self):

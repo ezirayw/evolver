@@ -153,7 +153,9 @@ def collect_od_data(
         logger.info(
             f"Done collecting voltage photodiode data, calculating and storing median values for calibration procedure step: {step_num}/{len(vial_list) - 1}"
         )
-        logger.info("\nRearrange standards by moving up one position and snaking highest standard index to lowest vial position.")
+        logger.info(
+            "\nRearrange standards by moving up them up one position and snaking the standard in the highest vial position the to the lowest position."
+        )
         while True:
             proceed = input("Ready to continue? [y/n]: ")
             if proceed == "y":
@@ -255,7 +257,6 @@ if __name__ == "__main__":
         final_calibration_data = fit_data(collected_calibration_data, True)
 
         # Send calibration data to server for long-term storage
-        logger.info(final_calibration_data)
         serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         htevolver_client.evolver.send_calibration(

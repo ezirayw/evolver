@@ -261,6 +261,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_status()
             ```
         """
+        logger.info("Received client request for current eVOLVER status.")
         status = {
             "phase": self.phase,
             "command_queue": [asdict(command) for command in self.command_queue],
@@ -268,7 +269,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             "running_broadcast": self.running_broadcast,
         }
         await self.emit("get_status", status, to=sid)
-        logger.info("Request for current HTeVOLVER status processed.")
+        logger.info("Request for current eVOLVER status processed.")
 
     async def on_request_conf(self, sid):
         """Respond with the current eVOLVER configuration.
@@ -282,17 +283,18 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_conf()
             ```
         """
+        logger.info("Received client request for current eVOLVER configuration")
         await self.emit("get_conf", self.evolver_conf, to=sid)
-        logger.info("Request for current HTeVOLVER configuration processed")
+        logger.info("Request for current eVOLVER configuration processed")
 
-    async def on_request_calibration(self, sid, data):
+    async def on_request_calibration(self, sid, calibration_request_data: dict):
         """Send calibration data to the client.
 
         Loads and sends the specified calibration file to the client.
 
         Args:
             sid (str): Session ID of the client.
-            data (dict): Dictionary with parameter, station_id, and filename.
+            calibration_request_data (dict): Dictionary with information to request proper calibration data.
                 Example: {"parameter": "temp", "station_id": 0, "filename": "calibration_data_temp_2023-01-01.json"}
 
         Examples:
@@ -301,14 +303,25 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_calibration("temp", 0, "calibration_data_temp_2023-01-01.json")
             ```
         """
+        logger.info(
+            f"Received client request for Smart Station: {calibration_request_data['station_id']} {calibration_request_data['parameter']} calibration data"
+        )
         try:
-            local_filename = os.path.join(self.calibration_directory, data["parameter"], data["filename"])
+            local_filename = os.path.join(
+                self.calibration_directory, calibration_request_data["parameter"], calibration_request_data["filename"]
+            )
             calibration_data = CalibrationData.from_file(local_filename)
-            await self.emit("get_calibration", sid, {"calibration_data": calibration_data, "station_id": data["station_id"]})
-            logger.info("Finished loading calibration data")
+            await self.emit(
+                "get_calibration",
+                sid,
+                {"calibration_data": calibration_data, "station_id": calibration_request_data["station_id"]},
+            )
+            logger.info("Finished loading in and sending calibration data")
         except FileNotFoundError:
-            logger.exception(f"Error loading calibration file: {data['filename']}", stack_info=True)
-            await self.emit("get_calibration", sid, {"calibration_data": {}, "station_id": data["station_id"]})
+            logger.exception(f"Error loading calibration file: {calibration_request_data['filename']}", stack_info=True)
+            await self.emit(
+                "get_calibration", sid, {"calibration_data": {}, "station_id": calibration_request_data["station_id"]}
+            )
 
     async def on_get_calibration(self, sid, new_calibration_data: dict):
         """Save calibration data received from a client.
@@ -323,9 +336,10 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         Examples:
             Called by client via:
             ```
-            client.evolver.send_calibration("temp", calibration_data, "2023-01-01_12-34-56")
+            client.evolver.send_calibration(calibration_data, metadata)
             ```
         """
+        logger.info("Received new calibration data from client. Processing now...")
         timestamp = new_calibration_data["metadata"]["timestamp"]
         parameter = new_calibration_data["metadata"]["parameter"]
         station_id = new_calibration_data["metadata"]["station_id"]
@@ -334,6 +348,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             self.calibration_directory, station_id, parameter, f"calibration_data_{parameter}_{timestamp}.json"
         )
         CalibrationData.to_file(filename, new_calibration_data["data"])
+        logger.info("Finished processing calibration data, saved to memory.")
 
     def load_conf(self):
         """Load the eVOLVER configuration from disk.

@@ -79,13 +79,13 @@ class CalibrationData:
         return x * a + b
 
     @staticmethod
-    def to_json(data: dict):
+    def to_json(data):
         """Convert calibration data to JSON-serializable format.
 
         Recursively converts numpy arrays and nested structures to standard Python types.
 
         Args:
-            data (dict): Data structure to convert, can contain numpy arrays, dictionaries, lists, etc.
+            data: Data structure to convert, can contain numpy arrays, dictionaries, lists, etc.
 
         Returns:
             dict: JSON-serializable version of the input data.
@@ -95,7 +95,7 @@ class CalibrationData:
             ...                           np.array([0.01, 0.01]), np.array([1.5, 3.0]))}
             >>> CalibrationData.to_json(data)
             {0: {'voltage': [1, 2], 'standards': [0.1, 0.2],
-                'standard_deviation': [0.01, 0.01], 'coefficients': [1.5, 3.0]}}
+                'coefficients': [1.5, 3.0], 'standard_deviation': [0.01, 0.01]}}
         """
         if isinstance(data, np.ndarray):
             return data.tolist()
@@ -105,14 +105,24 @@ class CalibrationData:
             return {k: CalibrationData.to_json(v) for k, v in data.items()}
         elif isinstance(data, list) or isinstance(data, tuple):
             return [CalibrationData.to_json(item) for item in data]
+        elif isinstance(data, CalibrationData):
+            return {
+                "voltage": CalibrationData.to_json(data.voltage),
+                "standards": CalibrationData.to_json(data.standards),
+                "coefficients": CalibrationData.to_json(data.coefficients),
+                "standard_deviation": CalibrationData.to_json(data.standard_deviation),
+                "complete": data.complete,
+                "step_num": data.step_num,
+                "settings": CalibrationData.to_json(data.settings),
+            }
         else:
             return data
 
-    @staticmethod
-    def to_file(filename: str, calibration_data: dict):
+    @classmethod
+    def to_file(cls, filename: str, calibration_data: dict):
         try:
             with open(filename, "w") as f:
-                json.dump(calibration_data, f, indent=4)
+                json.dump(cls.to_json(calibration_data), f, indent=4)
             logger.info(f"Calibration data saved to {filename}")
         except TypeError:
             logger.exception(f"Error serializing data: {calibration_data}", stack_info=True)
@@ -173,7 +183,6 @@ class CalibrationData:
                         coefficients=np.array(vial_data["coefficients"]),
                     )
             else:
-                # Format: {station: CalibrationData}
                 calibration_data[station] = cls(
                     voltage=np.array(value["voltage"]),
                     standards=np.array(value["standards"]),
@@ -183,8 +192,8 @@ class CalibrationData:
 
         return calibration_data
 
-    @staticmethod
-    def from_file(filename: str):
+    @classmethod
+    def from_file(cls, filename: str):
         """Load calibration data from a JSON file.
 
         Args:
@@ -204,7 +213,7 @@ class CalibrationData:
         """
         with open(filename, "r") as f:
             deserialize_data = json.load(f)
-        return CalibrationData.from_dict(deserialize_data)
+        return cls.from_dict(deserialize_data)
 
     @classmethod
     def save_calibration(cls, temporary_calibration_data: dict[int, "CalibrationData"], calibration_directory: str, type: str):
