@@ -22,7 +22,7 @@ class HTEvolverClient:
         ip (str): IP address of the eVOLVER server
         port (int): Port number of the eVOLVER server
         save (bool): Whether to save data locally
-        directory (str): directory for saving data
+        directory (str): directory for saving experiment data
         sio (socketio.Client): SocketIO client for communication
         evolver (EvolverClientNamespace): Namespace for eVOLVER control
         robotics (RoboticsClientNamespace): Namespace for robotics control
@@ -34,24 +34,22 @@ class HTEvolverClient:
         ip: str,
         port: int,
         save: bool,
-        directory: str = "/home/pi/htevolver/experiments",
-        calibration_directory: str = "/home/pi/htevolver/calibration",
+        exp_directory: str,
         station_ids: list[int] = [],
         data_buffer_size: int = 10,
     ):
         self.ip = ip
-        self.directory = directory
-        self.calibration_directory = "/home/pi/htevolver/calibration"
+        self.exp_directory = exp_directory
         self.save = save
         self.station_ids = station_ids or [0, 1, 2, 3]
         self.port = port
         self.data_buffer_size = data_buffer_size
 
         # Create data directory if it doesn't exist
-        if self.save and not os.path.exists(self.directory):
-            os.makedirs(self.directory)
+        if self.save and not os.path.exists(self.exp_directory):
+            os.makedirs(self.exp_directory)
             for station_id in self.station_ids:
-                station_dir = os.path.join(self.directory, f"station_{station_id}")
+                station_dir = os.path.join(self.exp_directory, f"station_{station_id}")
                 if not os.path.exists(station_dir):
                     os.makedirs(station_dir)
 
@@ -59,12 +57,12 @@ class HTEvolverClient:
 
         self.evolver = EvolverClientNamespace(
             save=self.save,
-            directory=self.directory,
+            directory=self.exp_directory,
             status=self.status,
             station_ids=self.station_ids,
             data_buffer_size=self.data_buffer_size,
         )
-        self.robotics = RoboticsClientNamespace(save=self.save, directory=self.directory, status=self.status)
+        self.robotics = RoboticsClientNamespace(save=self.save, directory=self.exp_directory, status=self.status)
         self.sio = socketio.Client()
         self.sio.register_namespace(self.evolver)
         self.sio.register_namespace(self.robotics)
@@ -300,22 +298,3 @@ class HTEvolverClient:
         for station_id in station_list:
             return_data[station_id] = {vial_id: tuple(od_data) for vial_id, od_data in voltage_readings[station_id].items()}
         return return_data
-
-    def send_calibration(self, parameter: str, calibration_data: dict, timestamp: str):
-        """Send calibration data to the server.
-
-        Transmits calibration data to the server for storage and future use.
-
-        Args:
-            parameter (str): Type of calibration data ("od" or "temp").
-            calibration_data (dict): Calibration data to send.
-            timestamp (str): Timestamp to associate with the calibration data.
-
-        Examples:
-            >>> client.send_calibration(
-            ...     "temp",
-            ...     {0: {"voltage": [...], "standards": [...], "coefficients": [...], "standard_deviation": [...]}},
-            ...     "2025-04-13_04-07-12"
-            ... )
-        """
-        self.evolver.send_calibration(parameter, calibration_data, timestamp)

@@ -119,7 +119,7 @@ def collect_od_data(
         )
 
     logger.info(
-        f"Place standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]}OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]}OD600 in vial_slot: {max(standards_mask)}."
+        f"\nPlace standards in Smart Station vial slots in ascending order according to vial list entered. \nExample, standard_0: {standards[0]}OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]}OD600 in vial_slot: {max(standards_mask)}."
     )
     while True:
         proceed = input("Ready to continue? [y/n]: ")
@@ -145,7 +145,9 @@ def collect_od_data(
                 )
                 calibration_data[vial_id].step_num = step_num
 
-        CalibrationData.save_calibration(calibration_data, htevolver_client.calibration_directory, "od")
+        CalibrationData.save_calibration(
+            calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "od"
+        )
 
         # instruct user to rearrange vials and continue to next step in the procedure
         logger.info(
@@ -167,6 +169,7 @@ def collect_od_data(
 
     for vial_id in calibration_data:
         calibration_data[vial_id].complete = True
+
     return calibration_data
 
 
@@ -229,12 +232,9 @@ if __name__ == "__main__":
         logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 
-    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
+    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
 
     # start data collection procedure based on target calibration protocol
-    collected_calibration_data = {}
-    final_calibration_data = {}
-
     for station_id in station_list:
         vial_list: list[int] = []
         while True:
@@ -252,19 +252,13 @@ if __name__ == "__main__":
                 except ValueError:
                     logger.error("Invalid list, try again")
         collected_calibration_data = collect_od_data(htevolver_client, vial_list, station_id, int(options.standard_number))
-        final_calibration_data[station_id] = fit_data(collected_calibration_data, True)
+        final_calibration_data = fit_data(collected_calibration_data, True)
 
-    # Generate filename with timestamp
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = os.path.join(htevolver_client.calibration_directory, f"calibration_data_od_{timestamp}.json")
-
-    # Convert data to serializable format
-    serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
-
-    # Send calibration data to server for long-term storage
-    htevolver_client.send_calibration("od", serialized_calibration_data, timestamp)
-
-    serializable_data = CalibrationData.to_json(final_calibration_data)
-    CalibrationData.to_file(filename, serializable_data)
+        # Send calibration data to server for long-term storage
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
+        htevolver_client.evolver.send_calibration(
+            serialized_calibration_data, metadata={"parameter": "od", "timestamp": timestamp, "station_id": station_id}
+        )
 
     htevolver_client.disconnect()

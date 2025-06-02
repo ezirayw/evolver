@@ -215,6 +215,9 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         for station_id in station_ids:
             self.stations[station_id] = SmartStationClient.create(station_id, data_buffer_size)
 
+        self.evolver_conf = {}
+        self.request_conf()
+
     def on_connect(self):
         """Handle connection to the server."""
         logger.info("Client connected to HTeVOVLER server via eVOLVER namespace")
@@ -247,6 +250,12 @@ class EvolverClientNamespace(socketio.ClientNamespace):
 
             self.broadcast_counter += 1
 
+    def on_get_conf(self, data):
+        """Handle server configuration data"""
+
+        self.evolver_conf = data
+        logger.info("Received server configuration data.")
+
     def on_get_calibration(self, data):
         """Handle calibration data received from the server.
 
@@ -262,6 +271,11 @@ class EvolverClientNamespace(socketio.ClientNamespace):
                 self.stations[data["station_id"]].temp_cal = calibration_data[data["station_id"]]
             if data["parameter"] == "od":
                 self.stations[data["station_id"]].od_cal = calibration_data[data["station_id"]]
+
+    def request_conf(self):
+        """Request eVOLVER server configuration"""
+        logger.info("Requesting current server configuration data")
+        self.emit("request_conf")
 
     def request_calibration(self, parameter: str, station_id: int, filename: str):
         """Request calibration data from the server.
@@ -279,7 +293,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         logger.info(f"Requesting {parameter} calibration data for Smart Station {station_id}")
         self.emit("request_calibration", {"parameter": parameter, "station_id": station_id, "filename": filename})
 
-    def send_calibration(self, parameter: str, calibration_data: dict, timestamp: str):
+    def send_calibration(self, serialized_calibration_data: dict, metadata: dict):
         """Send calibration data to the server.
 
         Transmits calibration data to the server for storage.
@@ -296,7 +310,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             ...     "2025-04-13_04-07-12"
             ... )
         """
-        self.emit("receive_calibration", {"parameter": parameter, "data": calibration_data, "timestamp": timestamp})
+        self.emit("get_calibration", {"data": serialized_calibration_data, "metadata": metadata})
 
     def save_data(self):
         """Save the current sensor data to disk.

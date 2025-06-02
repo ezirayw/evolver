@@ -171,7 +171,9 @@ def collect_temp_data(
         calibration_data[station_id].standard_deviation[room_temp_step_num] = np.std(voltage_triplets[station_id], dtype=float)
         calibration_data[station_id].standards[room_temp_step_num] = np.mean(temperature_measurements[station_id])
 
-    CalibrationData.save_calibration(calibration_data, htevolver_client.calibration_directory, "temp")
+    CalibrationData.save_calibration(
+        calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
+    )
 
     logger.info("Auto-calculating calibration setpoints based on number of temperature standards inputs.")
     for station_id in station_list:
@@ -233,7 +235,9 @@ def collect_temp_data(
             calibration_data[station_id].standards[step_num] = np.mean(temperature_measurements[station_id])
             calibration_data[station_id].step_num = step_num
 
-    CalibrationData.save_calibration(calibration_data, htevolver_client.calibration_directory, "temp")
+    CalibrationData.save_calibration(
+        calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
+    )
 
     for station_id in station_list:
         calibration_data[station_id].complete = True
@@ -295,17 +299,17 @@ if __name__ == "__main__":
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
-    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, station_ids=station_list)
+    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
 
     # Start data collection procedure
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
     final_calibration_data = fit_data(collected_calibration_data, True)
 
-    # Generate filename with timestamp
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = os.path.join(htevolver_client.calibration_directory, f"calibration_data_temp_{timestamp}.json")
-
-    serializable_data = CalibrationData.to_json(final_calibration_data)
-    CalibrationData.to_file(filename, serializable_data)
+    for station_id in final_calibration_data:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        serialized_calibration_data = CalibrationData.to_json({station_id: final_calibration_data[station_id]})
+        htevolver_client.evolver.send_calibration(
+            serialized_calibration_data, metadata={"parameter": "temp", "timestamp": timestamp, "station_id": station_id}
+        )
 
     htevolver_client.disconnect()

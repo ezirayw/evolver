@@ -137,9 +137,7 @@ log_level: "INFO"
 
 # RPi file locations and names
 calibration_directory: "/home/pi/calibrations"
-valid_calibrations: ["temp", "od", "ipp"]
-od_calibration_directory: od
-temp_calibration_directory: temp
+calibration_cache_directory: "/home/pi/calibrations/cache"
 
 # Serial communication
 serial_end_outgoing: "_!"

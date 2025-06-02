@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import struct
@@ -308,15 +307,15 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             logger.exception(f"Error loading calibration file: {data['filename']}", stack_info=True)
             await self.emit("get_calibration", sid, {"calibration_data": {}, "station_id": data["station_id"]})
 
-    async def on_receive_calibration(self, sid, new_calibration_data: dict):
+    async def on_get_calibration(self, sid, new_calibration_data: dict):
         """Save calibration data received from a client.
 
         Stores new calibration data received from a client to the appropriate file.
 
         Args:
             sid (str): Session ID of the client.
-            new_calibration_data (dict): Dictionary with parameter, data, and timestamp.
-                Example: {"parameter": "temp", "data": {...}, "timestamp": "2023-01-01_12-34-56"}
+            new_calibration_data (dict): Dictionary with serialized calibration data and metadata.
+                Example: {"data": {...}, "metadata": : {"timestamp", "2023-01-01_12-34-56", "parameter": "temp", "station_id": 0}}
 
         Examples:
             Called by client via:
@@ -324,22 +323,14 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.send_calibration("temp", calibration_data, "2023-01-01_12-34-56")
             ```
         """
-        timestamp = new_calibration_data["timestamp"]
-        parameter = new_calibration_data["parameter"]
+        timestamp = new_calibration_data["metadata"]["timestamp"]
+        parameter = new_calibration_data["metadata"]["parameter"]
+        station_id = new_calibration_data["metadata"]["station_id"]
 
-        try:
-            filename = os.path.join(self.calibration_directory, parameter, f"calibration_data_{parameter}_{timestamp}.json")
-            with open(filename, "w") as f:
-                json.dump(new_calibration_data["data"], f, indent=4)
-            logger.info(f"Calibration successfully saved to {filename}")
-        except FileNotFoundError as e:
-            logger.exception(f"Error saving calibration data: {e}. Saving a string-formatted backup")
-            filename = os.path.join(
-                self.calibration_directory, parameter, f"calibration_data_{parameter}_{timestamp}_STRING-BACKUP.txt"
-            )
-            with open(filename, "w") as f:
-                new_calibration_data_str = str(new_calibration_data)
-                f.write(new_calibration_data_str)
+        filename = os.path.join(
+            self.calibration_directory, station_id, parameter, f"calibration_data_{parameter}_{timestamp}.json"
+        )
+        CalibrationData.to_file(filename, new_calibration_data["data"])
 
     def load_conf(self):
         """Load the eVOLVER configuration from disk.
