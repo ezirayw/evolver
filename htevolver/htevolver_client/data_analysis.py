@@ -234,7 +234,7 @@ class GraphCalibration:
     Creates calibration graphs with measured points, error bars, and fitted lines.
 
     Attributes:
-        container_type (str): Type of container being calibrated (e.g., "Vial", "Smart Station").
+        container_type (str): Type of container being calibrated (e.g., "Vial", "SmartStation").
         title (str): Title for the calibration plot.
         units (str): Units for the calibration (e.g., "OD600", "Celsius").
         row (int): Number of rows in the subplot grid.
@@ -267,7 +267,7 @@ class GraphCalibration:
 
         Examples:
             >>> grapher = GraphCalibration(
-            ...     container_type="Smart Station",
+            ...     container_type="SmartStation",
             ...     title="Temperature",
             ...     units="Celsius",
             ...     row=2,

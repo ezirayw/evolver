@@ -84,7 +84,7 @@ class HTEvolverClient:
             >>> # Now the client is connected to the server
         """
         self.robotics.request_robotics_status()
-        self.robotics.request_robotics_conf()
+        self.robotics.request_robotics_config()
         self.robotics.connect_xArm()
         self.robotics.enable_pumps()
 
@@ -105,6 +105,34 @@ class HTEvolverClient:
         self.sio.disconnect()
         logger.info("Disconnected from the HTeVOLVER server")
 
+    def override(self, override_parameter, override_data):
+        """Override parameters in the robotics namespace.
+
+        Sends an override request to the robotics namespace on the server.
+        This method allows changing specific parameters in the robotics system configuration
+        or state at runtime.
+
+        Args:
+            override_parameter (str): The parameter to override (e.g., "state", "config").
+            override_data (dict): Dictionary containing the override data.
+
+        Examples:
+            >>> # Override the state of the robotics system
+            >>> client.override("state", {"running": False})
+            >>> # Override configuration parameters
+            >>> client.override("config", {"pipette_speed": 10})
+        """
+
+        valid_override_modes: list[str] = ["state", "routine", "config"]
+        logger.info("Received request to override robotics namespace status/config.")
+        for override_mode in override_data:
+            if override_mode not in valid_override_modes:
+                logger.error(f"Invalid override operation entered: {override_mode}")
+                return
+
+        self.robotics.emit("override", {override_parameter: override_data})
+        logger.info(f"Sent override command for parameter: {override_parameter} with data: {override_data}")
+
     def set_temp_calibration(self, station_id: int, filename: str):
         """Set temperature calibration for a specific station.
 
@@ -118,7 +146,7 @@ class HTEvolverClient:
         Examples:
             >>> client.set_temp_calibration(0, "calibration_data_temp_2025-04-13_04-07-12.json")
         """
-        logger.info(f"Setting the temperature calibration for Smart Station {station_id} with filename: {filename}")
+        logger.info(f"Setting the temperature calibration for SmartStation {station_id} with filename: {filename}")
         self.evolver.request_calibration("temp", station_id, filename)
 
     def update_temp(self, new_station_temps: dict[int, int]):
@@ -298,3 +326,23 @@ class HTEvolverClient:
         for station_id in station_list:
             return_data[station_id] = {vial_id: tuple(od_data) for vial_id, od_data in voltage_readings[station_id].items()}
         return return_data
+
+    def request_robotics_config(self, config_parameter: str | None = None):
+        logger.info("HT-eVOLVER client requesting robotics configuration.")
+        self.robotics.request_robotics_config()
+        if config_parameter:
+            return self.robotics.server_config.get(config_parameter, None)
+        else:
+            return self.robotics.server_config
+
+    def pipette(self, pipette_commands: dict):
+        logger.info(f"HT-eVOLVER client sending the following PipetteHead pipettte command: {pipette_commands}")
+        self.robotics.pipette(pipette_commands)
+
+    def prime_pipettehead(self, prime_commands: list):
+        logger.info(f"HT-eVOLVER client sending the following PipetteHead prime command: {prime_commands}")
+        self.robotics.prime_syringe_pumps(prime_commands)
+
+    def dilution(self, dilution_commands: dict):
+        logger.info(f"HT-eVOLVER client sending the following dilutions command: {dilution_commands}")
+        self.robotics.dilutions(dilution_commands)

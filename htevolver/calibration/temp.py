@@ -29,7 +29,7 @@ import sys
 import numpy as np
 from scipy.optimize import curve_fit
 
-from htevolver.calibration.calibration_cli import get_options
+from htevolver.calibration.calibration_cli import get_calibration_options
 from htevolver.htevolver_client.client import HTEvolverClient
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
@@ -37,7 +37,7 @@ from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalib
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
 MAX_TEMP = 1500
 MIN_TEMP = 2500
-STANDARD_NUM_MIN = 2
+STANDARD_NUM_MIN = 3
 LOGGING_DIR: str = "/home/pi/logs"
 
 # Configure client logger (logs to file)
@@ -88,21 +88,21 @@ def collect_temperature_measurements(station_list: list[int]):
 
     for station_id in station_list:
         temperature_input = None
-        print("\n")
-        logger.info(f"Measure vial temperatures for Smart Station:{station_id} with probe to generate temperature standards")
+        print()
+        logger.info(f"Measure vial temperatures for SmartStation:{station_id} with probe to generate temperature standards")
         for position_index, vial_position in enumerate(MEASURE_VIALS):
             while True:
                 try:
                     temperature_input = float(
-                        input(f"Enter temperature (C) value for vial slot {vial_position} in Smart Station:{station_id}: ")
+                        input(f"Enter temperature (C) value for vial slot {vial_position} in SmartStation:{station_id}: ")
                     )
                     if temperature_input >= 0 and temperature_input <= 100:
-                        validation = input(f"Entered value is {temperature_input}. Do you want to commit this value? [y/n]: ")
+                        validation = input(f"Commit temperature value {temperature_input}? [y/n]: ")
                         if validation == "y":
                             break
 
                 except ValueError:
-                    logger.exception("Error, must input a valid float number", stack_info=True)
+                    logger.exception("Error, must input a valid float number")
             temperature_measurements[station_id][position_index] = temperature_input
 
     return temperature_measurements
@@ -146,18 +146,16 @@ def collect_temp_data(
 
     # Prepare for room temperature measurements
     for station_id in station_list:
-        logger.info(f"Place vials filled with 6mL of water in all vial slots in Smart Station:{station_id}.")
-        while True:
-            proceed = input("Ready to continue? [y/n]: ")
-            if proceed == "y":
-                break
-    print("\n")
+        logger.info(f"Place vials filled with 6mL of water in all vial slots in SmartStation:{station_id}.")
+        while input("Ready to continue? [y/n]: ") != "y":
+            continue
+    print()
+
     logger.info("---- Starting room temperature step ----")
     logger.info("Wait for 30-60 mins to allow for room temperature equilibration...")
-    while True:
-        proceed = input("Ready to continue? [y/n]: ")
-        if proceed == "y":
-            break
+
+    while input("Ready to continue? [y/n]: ") != "y":
+        continue
 
     # Room temperature step
     room_temp_step_num = int(np.ceil(num_standards / 2))
@@ -199,14 +197,14 @@ def collect_temp_data(
         calibration_data[station_key].settings["setpoints"].append(MAX_TEMP)
 
         # Combine both lists and convert to integers
-        logger.info(f"Setpoints for Smart Station {station_id}: {calibration_data[station_key].settings['setpoints']} ")
+        logger.info(f"Setpoints for SmartStation {station_id}: {calibration_data[station_key].settings['setpoints']} ")
 
     # Loop through all temperature setpoints
     for step_num in range(num_standards):
         # Skip room temperature setpoint since we already have it
         if step_num == room_temp_step_num:
             continue
-        print("\n")
+        print()
         logger.info(f"---- Starting temperature sweep step: {step_num}/{num_standards - 1} ----")
 
         # Set uncalibrated temperature for each station
@@ -218,10 +216,9 @@ def collect_temp_data(
 
         # Wait for equilibration
         logger.info("Wait for 30-60 mins to allow for heat equilibration...")
-        while True:
-            proceed = input("Ready to continue? [y/n]: ")
-            if proceed == "y":
-                break
+
+        while input("Ready to continue? [y/n]: ") != "y":
+            continue
 
         logger.info(f"Temperature readings voltage readings starting for {step_num}, do not move vials or exit...")
         voltage_triplets = htevolver_client.get_new_temp(station_list)
@@ -266,7 +263,7 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
         >>> calibration_data = collect_temp_data(client, [0, 1], 3)
         >>> fitted_data = fit_data(calibration_data)
     """
-    print("\n")
+    print()
     logger.info("Generating linear fit for collected Temperature data...")
     for station_id in calibration_data:
         coefficients, cov = curve_fit(
@@ -292,11 +289,15 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
 
 
 if __name__ == "__main__":
-    options, parser = get_options()
+    options, parser = get_calibration_options()
     evolver_ip = options.ip_address
 
     if options.standard_number < STANDARD_NUM_MIN:
         logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
+        sys.exit(2)
+
+    if options.standard_number % 2 == 0:
+        logger.error("Number of standards must be an odd number.")
         sys.exit(2)
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]

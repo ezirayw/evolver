@@ -136,7 +136,7 @@ class xArmPlane:
 
 @dataclass
 class SmartStationRobotics:
-    """Represents a Smart Station with transformation capabilities for robotics.
+    """Represents a SmartStation with transformation capabilities for robotics.
 
     Manages the coordinate transformations between the vial grid system and the
     xArm coordinate system for both in-vial and above-vial planes.
@@ -160,7 +160,7 @@ class SmartStationRobotics:
         """Create a new SmartStationRobotics instance.
 
         Args:
-            config (dict): Configuration dictionary for the Smart Station.
+            config (dict): Configuration dictionary for the SmartStation.
                 Must include 'plane_in' and 'plane_out' sections for the transformation planes.
                 Should include 'wash_location' and 'wash_depth'.
 

@@ -245,9 +245,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             if self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] is not None:
                 self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] = evolver_command.value
             self.save_conf()
-            logger.info(f"Finished processed received EvolverCommand: {evolver_command}")
+            logger.info(f"Finished processing COMMAND on eVOLVER namespace: {evolver_command}")
         except EvolverError:
-            logger.exception(f"Error processing received EvolverCommand: {command}", stack_info=True)
+            logger.exception(f"Error processing COMMAND on eVOLVER namespace: {command}", stack_info=True)
 
     async def on_request_status(self, sid):
         """Respond with the current eVOLVER status.
@@ -261,7 +261,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_status()
             ```
         """
-        logger.info("Received client request for current eVOLVER status.")
+        logger.info("Received request for the current eVOLVER namespace status.")
         status = {
             "phase": self.phase,
             "command_queue": [asdict(command) for command in self.command_queue],
@@ -269,9 +269,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             "running_broadcast": self.running_broadcast,
         }
         await self.emit("get_status", status, to=sid)
-        logger.info("Request for current eVOLVER status processed.")
+        logger.info("Finished processing REQUEST_STATUS on eVOLVER namespace.")
 
-    async def on_request_conf(self, sid):
+    async def on_request_configig(self, sid):
         """Respond with the current eVOLVER configuration.
 
         Args:
@@ -280,12 +280,12 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         Examples:
             Called by client via:
             ```
-            client.evolver.request_conf()
+            client.evolver.request_config()
             ```
         """
-        logger.info("Received client request for current eVOLVER configuration")
+        logger.info("Received request for eVOLVER namespace configuration.")
         await self.emit("get_conf", self.evolver_conf, to=sid)
-        logger.info("Request for current eVOLVER configuration processed")
+        logger.info("Finished processing REQUEST_CONFIG on eVOLVER namespace")
 
     async def on_request_calibration(self, sid, calibration_request_data: dict):
         """Send calibration data to the client.
@@ -304,7 +304,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             ```
         """
         logger.info(
-            f"Received client request for Smart Station: {calibration_request_data['station_id']} {calibration_request_data['parameter']} calibration data"
+            f"Received request for SmartStation: {calibration_request_data['station_id']} {calibration_request_data['parameter']} calibration data"
         )
         try:
             local_filename = os.path.join(
@@ -313,14 +313,16 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             calibration_data = CalibrationData.from_file(local_filename)
             await self.emit(
                 "get_calibration",
-                sid,
                 {"calibration_data": calibration_data, "station_id": calibration_request_data["station_id"]},
+                to=sid,
             )
-            logger.info("Finished loading in and sending calibration data")
+            logger.info("Finished processing REQUEST_CALIBRATION on eVOLVER namespace.")
         except FileNotFoundError:
-            logger.exception(f"Error loading calibration file: {calibration_request_data['filename']}", stack_info=True)
+            logger.exception("Error processing REQUEST_CALIBRATION on eVOLVER namespace: ", stack_info=True)
             await self.emit(
-                "get_calibration", sid, {"calibration_data": {}, "station_id": calibration_request_data["station_id"]}
+                "get_calibration",
+                {"calibration_data": {}, "station_id": calibration_request_data["station_id"]},
+                to=sid,
             )
 
     async def on_get_calibration(self, sid, new_calibration_data: dict):
@@ -348,7 +350,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             self.calibration_directory, f"station_{station_id}", parameter, f"calibration_data_{parameter}_{timestamp}.json"
         )
         CalibrationData.to_file(filename, new_calibration_data["data"])
-        logger.info("Finished processing calibration data, saved to memory.")
+        logger.info("Finished processing GET_CALIBRATION on eVOLVER namespace.")
 
     def load_conf(self):
         """Load the eVOLVER configuration from disk.

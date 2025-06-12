@@ -1,12 +1,4 @@
 ---
-xArm:
-  ip: "192.168.1.200"
-  roll: 180
-  pitch: 0
-  yaw: 0
-  speed: 100
-  mvacc: 100
-
 states:
   - idle
   - pause
@@ -44,56 +36,56 @@ wash_settings:
   submersed_time: 10 # seconds
   dry_time: 10 # seconds
 
+xArm:
+  ip: "192.168.1.200"
+  roll: 180
+  pitch: 0
+  yaw: 0
+  speed: 100
+  mvacc: 100
+
 pipette_head:
   serial_port: ""
   pumps:
     0:
-      primary: media
+      fluid: media
       type: dummy
       head_port: 1
       ports:
         2:
-          fluid: media
           primed: False
           volume: 0
         3:
-          fluid: sterilize
           primed: False
           volume: 0
     1:
-      primary: media
+      fluid: media
       type: dummy
       ports:
         2:
-          fluid: media
           primed: False
           volume: 0
         3:
-          fluid: sterilize
           primed: False
           volume: 0
     2:
-      primary: media
+      fluid: media
       type: dummy
       ports:
         2:
-          fluid: media
           primed: False
           volume: 0
         3:
-          fluid: sterilize
           primed: False
           volume: 0
     3:
-      primary: media
+      fluid: media
       type: dummy
       ports:
         2:
-          fluid: media
           primed: False
           volume: 0
         3:
-          fluid: sterilize
           primed: False
           volume: 0
 

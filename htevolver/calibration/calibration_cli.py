@@ -1,10 +1,9 @@
 import argparse
 
-DEFAULT_NUM_STANDARDS: int = 18
 DEFAULT_STATION_LIST: list[int] = [0, 1, 2, 3]
 
 
-def get_options():
+def get_calibration_options():
     description = "CLI tool to run HT-eVOLVER calibration modules"
     parser = argparse.ArgumentParser(description=description, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
@@ -21,19 +20,18 @@ def get_options():
         "--standard_number",
         type=int,
         action="store",
-        required=False,
-        help="Number of standards to use (e.g. temperature steps or OD references)",
-        default=DEFAULT_NUM_STANDARDS,
+        required=True,
+        help="Number of standards to use (e.g. temperature steps or OD references). Must be odd for temperature",
     )
 
     parser.add_argument(
         "-q",
-        "--stations",
+        "--station_ids",
         action="store",
         nargs="*",
         type=lambda s: int(s),
         required=False,
-        help="List of Smart Stations to iterate calibration protocol over (space separated).",
+        help="List of SmartStations IDs to iterate calibration protocol over (space separated).",
         default=DEFAULT_STATION_LIST,
     )
 

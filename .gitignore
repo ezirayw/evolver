@@ -5,5 +5,5 @@
 .python-version
 .DS_Store
 /dist
-*/__pycache__
 /*.egg-info
+**/__pycache__

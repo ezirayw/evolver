@@ -2,14 +2,14 @@ import logging
 
 import numpy as np
 
-from htevolver.calibration.calibration_cli import get_options
+from htevolver.calibration.calibration_cli import get_calibration_options
 from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
 
 logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
-    options, parser = get_options()
+    options, parser = get_calibration_options()
 
     data_filepath = options.calibration_file
     calibration_data = CalibrationData.from_file(data_filepath)
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     # graph the calibration curves
     if calibration_type == "temp":
         grapher = GraphCalibration(
-            container_type="Smart Station",
+            container_type="SmartStation",
             title="Temperature",
             units="Celsius",
             row=2,
@@ -52,7 +52,7 @@ if __name__ == "__main__":
         for station_id, station_calibration_data in calibration_data.items():
             grapher = GraphCalibration(
                 container_type="Vial",
-                title=f"Smart Station {station_id}",
+                title=f"SmartStation {station_id}",
                 units="OD600",
                 row=3,
                 column=6,

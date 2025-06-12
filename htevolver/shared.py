@@ -3,6 +3,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+class ServerResultCodes(Enum):
+    SUCCESS = 0
+    NOT_READY = 1
+    EXIT_ROUTINE = 2
+    ROBOTICS_ERROR = 3
+    ROUTINE_ERROR = 4
+
+
 class FluidTypes(Enum):
     EMPTY = 0
     MEDIA = 1

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EffluxBoard:
-    """Represents the efflux board of a Smart Station.
+    """Represents the efflux board of a SmartStation.
 
     Manages the peristaltic pump frequency and fluid volume conversion.
 
@@ -73,12 +73,12 @@ class SensorData:
 
 @dataclass
 class SmartStationClient:
-    """Client-side representation of a Smart Station.
+    """Client-side representation of a SmartStation.
 
-    Manages and processes data for a single Smart Station, including temperature and OD readings.
+    Manages and processes data for a single SmartStation, including temperature and OD readings.
 
     Attributes:
-        id (int): ID of the Smart Station.
+        id (int): ID of the SmartStation.
         data_buffer_size (int): Maximum number of readings to store.
         left_vials (list[int]): List of vial IDs on the left side of the station.
         right_vials (list[int]): List of vial IDs on the right side of the station.
@@ -112,7 +112,7 @@ class SmartStationClient:
         Factory method to create a properly initialized SmartStationClient.
 
         Args:
-            station_id (int): ID of the Smart Station.
+            station_id (int): ID of the SmartStation.
             data_buffer_size (int): Maximum number of readings to store.
 
         Returns:
@@ -219,7 +219,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
 
     def on_connect(self):
         """Handle connection to the server."""
-        self.request_conf()
+        self.request_config()
         logger.info("Client connected to HTeVOVLER server via eVOLVER namespace")
 
     def on_disconnect(self, *args):
@@ -250,7 +250,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
 
             self.broadcast_counter += 1
 
-    def on_get_conf(self, data):
+    def on_get_config(self, data):
         """Handle server configuration data"""
 
         self.evolver_conf = data
@@ -272,10 +272,10 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             if data["parameter"] == "od":
                 self.stations[data["station_id"]].od_cal = calibration_data[data["station_id"]]
 
-    def request_conf(self):
+    def request_config(self):
         """Request eVOLVER server configuration"""
         logger.info("Requesting current server configuration data")
-        self.emit("request_conf")
+        self.emit("request_config")
 
     def request_calibration(self, parameter: str, station_id: int, filename: str):
         """Request calibration data from the server.
@@ -290,7 +290,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         Examples:
             >>> evolver_ns.request_calibration("temp", 0, "calibration_data_temp_2025-04-13_04-07-12.json")
         """
-        logger.info(f"Requesting {parameter} calibration data for Smart Station {station_id}")
+        logger.info(f"Requesting {parameter} calibration data for SmartStation {station_id}")
         self.emit("request_calibration", {"parameter": parameter, "station_id": station_id, "filename": filename})
 
     def send_calibration(self, serialized_calibration_data: dict, metadata: dict):
@@ -311,7 +311,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         """
         self.emit("get_calibration", {"data": serialized_calibration_data, "metadata": metadata})
         logger.info(
-            f"Recently generated {metadata['parameter']} calibration data for Smart Station {metadata['station_id']} sent to server."
+            f"Recently generated {metadata['parameter']} calibration data for SmartStation {metadata['station_id']} sent to server."
         )
 
     def save_data(self):

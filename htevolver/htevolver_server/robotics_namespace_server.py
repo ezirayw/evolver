@@ -2,19 +2,20 @@ import asyncio
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 import socketio
 import yaml
 from tecancavro.syringe import SyringeError, SyringeTimeout
 
-from htevolver.exceptions import ExitRobotics, PipetteHeadError, RoboticsError, xArmError
+from htevolver.exceptions import PipetteHeadError, RoboticsError, StopRobotics, xArmError
 from htevolver.robotics.pipette_head import FluidTypes, PipetteHead
 from htevolver.robotics.smart_station import SmartStationRobotics, VialCoordinate
 from htevolver.robotics.xarm import xArm, xArmCoordinate
 from htevolver.shared import (
     RoboticsRoutines,
     RoboticsState,
+    ServerResultCodes,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ServerResult:
-    """Container for results returned by server-side robotics routines.
+    """Container for return data following robotic namespace routine requests.
 
     Stores the result of a robotics operation including success status,
     timing information, and current system state.
@@ -34,14 +35,19 @@ class ServerResult:
         status (dict): Current status of the robotics system.
         elapsed_time (float): Time taken to execute the operation in seconds.
         message (str): Descriptive message about the operation result.
+        code(int): Error code for the operation, useful for error handling and programmatic responses.
+            0 -> Request handled successfully
+            1 -> StopRobotics error encountered due to incompatible state
+            2 -> RoboticsError error encountered due to robotics module error
     """
 
     done: bool
     namespace: str
-    routine: str
+    event: str
     status: dict
     elapsed_time: float
     message: str
+    code: int
 
 
 def routine_decorator(routine_type: RoboticsRoutines):
@@ -78,55 +84,64 @@ def routine_decorator(routine_type: RoboticsRoutines):
                     await self.check_for_interrupt()
                     self.routine = routine_type
 
-                    logger.info(f"Running {func.__name__} routine")
-                    result, message = await func(self, *args, **kwargs)
+                    logger.info(f"Running the routine: {routine_type.name}")
+                    result = await func(self, *args, **kwargs)
 
-                    logger.info(f"Done running the {func.__name__} routine")
+                    logger.info(f"Done running the routine: {routine_type.name}")
                     end_time = time.time()
                     self.routine = RoboticsRoutines.NO_ROUTINE
                     self.state = RoboticsState.READY
-                    return ServerResult(
-                        done=result,
-                        namespace="/robotics",
-                        routine=routine_type.name,
-                        status=self.to_dict(),
-                        elapsed_time=end_time - start_time,
-                        message=f"{func.__name__}: {message}",
+                    return asdict(
+                        ServerResult(
+                            done=result,
+                            namespace="/robotics",
+                            event=func.__name__,
+                            status=self.to_dict(),
+                            elapsed_time=end_time - start_time,
+                            message=ServerResultCodes.SUCCESS.name if result else ServerResultCodes.ROUTINE_ERROR.name,
+                            code=ServerResultCodes.SUCCESS.value if result else ServerResultCodes.ROUTINE_ERROR.value,
+                        )
                     )
-                except ExitRobotics:
+
+                except StopRobotics:
                     end_time = time.time()
                     self.routine = RoboticsRoutines.NO_ROUTINE
                     self.state = RoboticsState.READY
-                    logger.info(f"STOP detected while running {func.__name__}, exiting")
-                    return ServerResult(
-                        done=False,
-                        namespace="/robotics",
-                        routine=routine_type.name,
-                        status=self.to_dict(),
-                        elapsed_time=end_time - start_time,
-                        message=f"STOP detected while running {func.__name__}, exiting",
+                    logger.info(f"Stop state detected while running {routine_type.name}, exiting")
+                    return asdict(
+                        ServerResult(
+                            done=False,
+                            namespace="/robotics",
+                            event=func.__name__,
+                            status=self.to_dict(),
+                            elapsed_time=end_time - start_time,
+                            message=ServerResultCodes.EXIT_ROUTINE.name,
+                            code=ServerResultCodes.EXIT_ROUTINE.value,
+                        )
                     )
-                except RoboticsError as e:
+                except RoboticsError:
                     end_time = time.time()
                     self.state = RoboticsState.EMERGENCY_STOP
-                    logger.exception(f"Error encountered trying to run {func.__name__}", stack_info=True)
+                    logger.exception(f"Robotics module error encountered trying to run {routine_type.name}", stack_info=True)
                     return ServerResult(
                         done=False,
                         namespace="/robotics",
-                        routine=routine_type.name,
+                        event=func.__name__,
                         status=self.to_dict(),
                         elapsed_time=end_time - start_time,
-                        message=f"Error encountered trying to run {func.__name__}: {e}",
+                        message=ServerResultCodes.ROBOTICS_ERROR.name,
+                        code=ServerResultCodes.ROBOTICS_ERROR.value,
                     )
             else:
-                logger.warning(f"Tried running the {func.__name__} routine but the robotics namespace is not in a READY state")
+                logger.warning(f"Tried running the {routine_type.name} routine but not in ready state.")
                 return ServerResult(
                     done=False,
                     namespace="/robotics",
-                    routine=routine_type.name,
+                    event=func.__name__,
                     status=self.to_dict(),
                     elapsed_time=0.00,
-                    message=f"Tried running the {func.__name__} routine but the robotics namespace is not in a READY state",
+                    message=ServerResultCodes.NOT_READY.name,
+                    code=ServerResultCodes.NOT_READY.value,
                 )
 
         return wrapper
@@ -136,9 +151,9 @@ def routine_decorator(routine_type: RoboticsRoutines):
 
 @dataclass
 class StationPumpCommands:
-    """Container for pump commands for all vials in a Smart Station.
+    """Container for pump commands for all vials in a SmartStation.
 
-    Stores fluid dispensing commands for each of the 18 vials in a Smart Station.
+    Stores fluid dispensing commands for each of the 18 vials in a SmartStation.
     Each vial can have multiple fluid types and volumes specified.
 
     Attributes:
@@ -237,57 +252,124 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
         logger.info("Client disconnected to robotics namespace")
 
-    async def on_request_status(self, sid) -> None:
+    async def on_request_status(self, sid) -> dict:
         """Send the current robotics system status to the client.
 
         Responds to a client request for the current status of the robotics system.
 
         Args:
             sid (str): Session ID of the requesting client.
-        """
-        await self.emit("get_status", self.to_dict(), to=sid)
-        logger.info("Finished processing REQUEST_STATUS on robotics namespace")
 
-    async def on_request_config(self, sid) -> None:
+        Returns:
+            dict: Dictionary representation of ServerResult object
+        """
+        logger.info("Received request for the current robotics namespace status.")
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_request_status",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_request_config(self, sid) -> dict:
         """Send the current robotics configuration to the client.
 
         Responds to a client request for the current robotics configuration.
 
         Args:
             sid (str): Session ID of the requesting client.
+
+        Returns:
+            dict: Dictionary representation of ServerResult object
         """
-        await self.emit("get_conf", self.robotics_config, to=sid)
-        logger.info("Finished processing REQUEST_CONFIG on robotics namespace")
+        logger.info("Received configuration request for the robotics namespace.")
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_request_status",
+                status=self.robotics_config,
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
 
-    async def on_override_status(self, sid, override_data: dict) -> None:
-        """Override system status values for manual intervention.
+    async def on_override(self, sid, override_data: dict) -> dict:
+        """Override system state, routine, and/or configuration for manual intervention.
 
-        Allows manual overriding of system status attributes for recovery
-        from error states.
+        Allows manual overriding of system state, routine, and/or configuration attributes to update
+        configuration values or enable recovery from error states.
 
         Args:
             sid (str): Session ID of the client.
-            override_data (dict): Dictionary mapping attribute names to their new values.
-                Example: {"state": RoboticsState.READY.value}
+            override_data (dict): Dictionary mapping either state, routine, and/or config
+                attribute names to their new values.
+                Example: {
+                    "state": {"state": RoboticsState.READY.value},
+                    "routine": {"routine": RoboticsRoutines.PIPETTE.value},
+                    "config": {
+                        "pipette_head": {
+                            "pumps": [
+                                {"id": 0, "port": "/dev/ttyUSB0", "enabled": true}
+                            ],
+                            "default_dispense_rate": 500
+                        }
+                    }
+                }
+
+        Returns:
+            dict: Dictionary representation of ServerResult object
+
         """
+        logger.info(f"Received override request on the robotics namespace: {override_data}")
+        if "state" in override_data or "routine" in override_data:
+            override_key = None
+            if "state" in override_data:
+                override_key = "state"
+            elif "routine" in override_data:
+                override_key = "routine"
 
-        for override_key, value in override_data.items():
-            if hasattr(self, override_key):
-                # Check the type of the existing attribute and ensure new value matches
-                attribute_value = getattr(self, override_key)
-                attr_type = type(attribute_value)
-                try:
-                    # Try to cast the new value to the correct type
-                    typed_value = attr_type(value)
-                    setattr(self, override_key, typed_value)
-                except (ValueError, TypeError):
-                    logger.exception(
-                        f"Invalid type for {override_key}: expected {attr_type.__name__}, got {type(value).__name__}",
-                        stack_info=True,
-                    )
-        logger.info(f"Finished processing OVERRIDE_STATUS on robotics namespace: {override_data}")
+            # Process the state or routine override if present
+            if override_key is not None:
+                for key, value in override_data[override_key].items():
+                    if hasattr(self, key):
+                        attribute_value = getattr(self, key)
+                        attr_type = type(attribute_value)
+                        if isinstance(value, attr_type):
+                            setattr(self, key, value)
+                        else:
+                            logger.warning(f"Type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}")
 
-    async def on_pause(self, sid) -> None:
+        elif "config" in override_data:
+            for key, value in override_data["config"].items():
+                if key in self.robotics_config:
+                    attribute_value = self.robotics_config[key]
+                    attr_type = type(attribute_value)
+                    if isinstance(value, attr_type):
+                        self.robotics_config[key] = value
+                    else:
+                        logger.warning(f"Type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}")
+            self.update_robotics()
+
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_override",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_pause(self, sid) -> dict:
         """Pause robotics operations.
 
         Sets the robotics system to PAUSE state if currently BUSY.
@@ -295,11 +377,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         Args:
             sid (str): Session ID of the client.
-        """
-        self.pause_robotics()
-        logger.info("Finished processing PAUSE on robotics namespace")
 
-    async def on_resume(self, sid) -> None:
+        Returns:
+            dict: Dictionary representation of ServerResult object
+        """
+        logger.info("Received request to pause an active routine.")
+        self.pause_robotics()
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_pause",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_resume(self, sid) -> dict:
         """Resume paused robotics operations.
 
         Resumes the robotics system from PAUSE state back to BUSY.
@@ -307,11 +403,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         Args:
             sid (str): Session ID of the client.
-        """
-        self.resume_robotics()
-        logger.info("Finished processing RESUME on robotics namespace")
 
-    async def on_stop(self, sid) -> None:
+        Returns:
+            dict: Dictionary representation of ServerResult object
+        """
+        logger.info("Received request to resume an active routines.")
+        self.resume_robotics()
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_resume",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_stop(self, sid) -> dict:
         """Stop all robotics operations immediately.
 
         Sets the system to STOP state and terminates all active processes.
@@ -319,34 +429,75 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         Args:
             sid (str): Session ID of the client.
-        """
-        self.stop_robotics()
-        logger.info("Finished processing STOP on robotics namespace")
 
-    async def on_connect_xArm(self, sid) -> None:
+        Returns:
+            dict: Dictionary representation of ServerResult object
+        """
+        logger.info("Received request to stop an active routine.")
+        self.stop_robotics()
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_stop",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_connect_xArm(self, sid) -> dict:
         """Connect to the xArm hardware.
 
         Attempts to establish a connection with the xArm robot.
 
         Args:
             sid (str): Session ID of the client.
-        """
-        self.arm.connect()
-        logger.info("Finished processing CONNECT_xARM on robotics namespace")
 
-    async def on_reset_xArm(self, sid) -> None:
+        Returns:
+            dict: Dictionary representation of ServerResult object
+        """
+        logger.info("Received request to connect to the xArm.")
+        self.arm.connect()
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_connect_xArm",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
+
+    async def on_reset_xArm(self, sid) -> dict:
         """Reset the xArm to clear errors.
 
         Reconnects if disconnected and resets the arm to clear error states.
 
         Args:
             sid (str): Session ID of the client.
+
+        Returns:
+            dict: Dictionary representation of ServerResult object
         """
-
+        logger.info("Received request to reset xArm.")
         self.arm.reset()
-        logger.info("Finished processing RESET_xARM on robotics namespace")
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_reset_xArm",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
 
-    async def on_enable_pumps(self, sid, pump_list: list[int] = [0, 1, 2, 3]) -> None:
+    async def on_enable_pumps(self, sid, pump_list: list[int] = [0, 1, 2, 3]) -> dict:
         """Enable PipetteHead syringe pumps.
 
         Enables specified syringe pumps to execute commands.
@@ -355,12 +506,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
             pump_list (list[int], optional): List of pump IDs to connect.
                 Defaults to [0, 1, 2, 3].
+
+        Returns:
+            dict: Dictionary representation of ServerResult object
         """
-
+        logger.info("Received request to enable PipetteHead syringe pumps.")
         self.pipette_head.enable(pump_list)
-        logger.info(f"Finished processing ENABLE_PUMPS on robotics namespace: {pump_list}")
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_enable_pumps",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
 
-    async def on_disable_pumps(self, sid, pump_list: list[int] = []) -> None:
+    async def on_disable_pumps(self, sid, pump_list: list[int] = []) -> dict:
         """Disables PipetteHead syringe pumps.
 
         Disable specified syringe pumps.
@@ -369,12 +533,27 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             sid (str): Session ID of the client.
             pump_list (list[int], optional): List of pump IDs to disable.
                 Defaults to an empty list.
+
+        Returns:
+            dict: Dictionary representation of ServerResult object
         """
+        logger.info("Received request to disable PipetteHead syringe pumps.")
         for pump_id in pump_list:
             self.pipette_head.disable(pump_list)
+        return asdict(
+            ServerResult(
+                done=True,
+                namespace="/robotics",
+                event="on_disable_pumps",
+                status=self.to_dict(),
+                elapsed_time=0.00,
+                message=ServerResultCodes.SUCCESS.name,
+                code=ServerResultCodes.SUCCESS.value,
+            )
+        )
 
     @routine_decorator(RoboticsRoutines.PRIMING_INFLUX)
-    async def on_prime_pumps(self, sid, pump_list: list[int] = []) -> tuple[bool, str]:
+    async def on_prime_pumps(self, sid, pump_list: list[int] = []) -> bool:
         """Prime the specified syringe pumps.
 
         Prepares the syringe pumps for use by filling the input tubing with fluid.
@@ -385,7 +564,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to an empty list.
 
         Returns:
-            tuple[bool, str]: Success status and descriptive message.
+            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -394,10 +573,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             ```
         """
         await self.pipette_head.prime(pump_list)
-        return (True, "executed successfully")
+        return True
 
     @routine_decorator(RoboticsRoutines.PUMP_INITIALIZE)
-    async def on_initialize_pumps(self, sid, pump_list: list[int] = []) -> tuple[bool, str]:
+    async def on_initialize_pumps(self, sid, pump_list: list[int] = []) -> bool:
         """Initialize the syringe pumps.
 
         Initializes the XCaliburD/Tecan syringe pumps for operation.
@@ -408,7 +587,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to an empty list.
 
         Returns:
-            tuple[bool, str]: Success status and descriptive message.
+            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -418,10 +597,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
 
         await self.pipette_head.prime(pump_list)
-        return (True, "executed successfully")
+        return True
 
     @routine_decorator(RoboticsRoutines.PIPETTE)
-    async def on_pipette_routine(self, sid, pipette_commands: list[int]) -> tuple[bool, str]:
+    async def on_pipette_routine(self, sid, pipette_commands: list[int]) -> bool:
         """Execute a pipetting operation.
 
         Runs the PipetteHead to transfer fluids with the specified volumes.
@@ -432,20 +611,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Example: [100, 0, 50, 0] for 100μL from pump 0 and 50μL from pump 2.
 
         Returns:
-            tuple[bool, str]: Success status and descriptive message.
+            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
             ```
-            client.pipette({0: ("MEDIA", 100), 2: ("DRUG", 50)})
+            client.pipette([100, 0, 50, 0])
             ```
         """
 
+        for pipette_volume in pipette_commands:
+            if pipette_volume <= 0:
+                return False
+
         await self.pipette_event(pipette_commands)
-        return (True, "executed successfully")
+        return True
 
     @routine_decorator(RoboticsRoutines.FILLING_VIALS_PUMPS)
-    async def on_fill_vials_routine(self, sid, fill_commands: dict[int, tuple[str, int]]) -> tuple[bool, str]:
+    async def on_fill_vials_routine(self, sid, fill_commands: dict[int, tuple[str, int]]) -> bool:
         """Fill vials with specified fluids.
 
         Fills vials in specified SmartStations with the given fluid types and volumes.
@@ -457,7 +640,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Example: {0: ("MEDIA", 1000), 1: ("DRUG", 500)}
 
         Returns:
-            tuple[bool, str]: Success status and descriptive message.
+            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -468,11 +651,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         for station_id, fill_command in fill_commands.items():
             if fill_command[0] not in FluidTypes.__members__:
-                logger.warning(f"Invalid fluid type entered: {fill_command[0]}")
-                return (False, f"Invalid fluid type entered: {fill_command[0]}")
+                logger.error(f"Invalid fluid type entered: {fill_command[0]}")
+                return False
             if fill_command[1] > 7000:
-                logger.warning(f"Invalid volume entered: {fill_command[1]}")
-                return (False, f"Invalid volume entered: {fill_command[1]}")
+                logger.error(f"Invalid volume entered: {fill_command[1]}")
+                return False
 
         station_pump_commands = {}
         for station_id, fill_command in fill_commands.items():
@@ -497,10 +680,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 vial_17={fill_command[0]: fill_command[1]},
             )
         await self.influx_snake_helper(station_pump_commands)
-        return (True, "executed successfully")
+        return True
 
     @routine_decorator(RoboticsRoutines.DILUTION)
-    async def on_dilution_routine(self, sid, dilution_commands: dict[int, dict[int, dict[str, int]]]) -> tuple[bool, str]:
+    async def on_dilution_routine(self, sid, dilution_commands: dict[int, dict[int, dict[str, int]]]) -> bool:
         """Execute dilutions across SmartStations.
 
         Performs dilution operations by adding specified fluids and volumes
@@ -513,8 +696,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Example: {0: {3: {"MEDIA": 100, "DRUG": 50}}}
 
         Returns:
-            tuple[bool, str]: Success status and descriptive message.
-
+            bool: Indicates wheter or not the routine was completed successfully.
         Examples:
             Called by the client via:
             ```
@@ -532,14 +714,18 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             influx_commands[station_id] = StationPumpCommands()
             for vial_id, pump_commands in dilution_command.items():
                 for fluid_type, volume in pump_commands.items():
+                    if fluid_type not in FluidTypes.__members__:
+                        logger.error(f"Invalid fluid type entered: {fluid_type}")
+                        return False
+
                     if volume < 0:
-                        return (
-                            False,
-                            f"Negative volume detected for vial_{vial_id} in Smart Station_{station_id}: {(fluid_type, volume)}",
+                        logger.error(
+                            f"Negative volume detected for vial_{vial_id} in SmartStation_{station_id}: {(fluid_type, volume)}"
                         )
+                        return False
                 influx_commands[station_id].__setattr__(f"vial_{vial_id}", pump_commands)
         await self.influx_snake_helper(influx_commands)
-        return (True, "executed successfully")
+        return True
 
     async def influx_snake_helper(self, station_pump_commands: dict[int, StationPumpCommands]) -> None:
         """Execute sequential pipetting in a snake-like pattern.
@@ -552,7 +738,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 station IDs to pump commands for each vial.
 
         Raises:
-            RoboticsError: If an error occurs during pipetting operations.
+            RoboticsError: If a robotics module error occurs during pipetting operations.
         """
 
         coordinate = VialCoordinate(x=-18, y=36)
@@ -662,7 +848,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to False.
 
         Raises:
-            RoboticsError: If an error occurs during aspiration or dispense.
+            RoboticsError: Triggers if PipetteHead or xArm error occurs during aspiration or dispense.
         """
 
         ################# ASPIRATION STEP #################
@@ -787,6 +973,17 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         self.arm.connected = xarm_api_data["connected"]
         logger.debug(f"xArm connect change callback input: {xarm_api_data}")
 
+    def save_config(self):
+        """Save the robotics configuration to disk.
+
+        Writes the current settings to the robotics_config file to persist
+        any changes made during operation.
+        """
+
+        with open(self.robotics_config_path, "w") as conf:
+            yaml.dump(self.robotics_config, conf, default_flow_style=False)
+        logger.info("Robotics configuration saved to disk")
+
     def load_config(self):
         """Load the robotics configuration from disk.
 
@@ -872,12 +1069,12 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to 60. Set to 0 to disable timeout.
 
         Raises:
-            ExitRobotics: If a STOP state is detected.
+            StopRobotics: If a STOP state is detected.
         """
 
         while self.state == RoboticsState.PAUSE:
             if self.state == RoboticsState.STOP:
-                raise ExitRobotics
+                raise StopRobotics
             else:
                 await asyncio.sleep(0.1)
 

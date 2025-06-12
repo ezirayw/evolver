@@ -48,7 +48,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         directory (str): Directory for saving data.
         status (HTEvolverStatus): Status of the HT Evolver system.
         robotics_ns (dict): Robotics namespace data.
-        server_conf (dict): Server configuration data.
+        server_config (dict): Server configuration data.
         server_types (dict[str, dict[str, int]]): Server data type definitions.
         ack (bool): Acknowledgment flag for communication.
     """
@@ -58,7 +58,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.save: bool = save
         self.directory: str = directory
         self.status: HTEvolverStatus = status
-        self.server_conf: dict = {}
+        self.server_config: dict = {}
         self.server_types: dict[str, dict[str, int]] = {}
         self.ack: bool = False
 
@@ -97,42 +97,14 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.status.robotics = status
         logger.info(f"Robotics namespace broadcast: {self.status.robotics}")
 
-    def on_get_status(self, status: dict):
-        """Handle status data received from the server.
-
-        Updates the local status with data received from the server.
-        This is the response to a request_robotics_status() call.
-
-        Args:
-            status (dict): Status data received from the server, containing
-                robotics state, current routine, active stations, and status
-                of the xArm and pipette head components.
-        """
-        self.status.robotics = status
-        logger.info(f"Robotics namespace broadcast processed: {self.status}")
-
-    def on_get_conf(self, data: dict):
-        """Handle configuration data received from the server.
-
-        Updates the local configuration with data received from the server.
-        This configuration includes settings for the xArm, SmartStations,
-        and PipetteHead components.
-
-        Args:
-            data (dict): Configuration data received from the server, containing
-                xArm settings, SmartStation vial mappings and coordinates, and
-                PipetteHead configurations.
-        """
-        self.server_conf = data
-        logger.info("Received robotics namespace configuration from HTeVOLVER server.")
-
-    def acknowledge(self):
+    def acknowledge(self, request_name):
         """Acknowledge receipt of status request.
 
         Called by the server as a callback to confirm that a status request was received.
         Sets the ack flag to True which unblocks the check_ready() method.
         """
         self.ack: bool = True
+        logger.info(f"{request_name} complete")
 
     def request_robotics_status(self):
         """Request status information from the server.
@@ -144,21 +116,23 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         Examples:
             >>> robotics_ns.request_robotics_status()
         """
-        self.emit("request_status", callback=self.acknowledge)
         logger.info("Requesting robotics namespace status from HTeVOLVER server.")
+        self.emit("request_config", callback=lambda status_data: setattr(self, "status", status_data))
+        logger.info("Finished processing robotics namespace status request.")
 
-    def request_robotics_conf(self):
+    def request_robotics_config(self):
         """Request configuration from the server.
 
         Asks the server to send current robotics configuration information.
-        The server will respond by calling the on_get_conf() callback with
+        The server will respond by calling the on_get_config() callback with
         the current robotics configuration data from robotics_conf.yml.
 
         Examples:
-            >>> robotics_ns.request_robotics_conf()
+            >>> robotics_ns.request_robotics_config()
         """
-        self.emit("request_conf")
         logger.info("Requesting robotics namespace configuration from HTeVOLVER server.")
+        self.emit("request_config", callback=lambda config_data: setattr(self, "server_config", config_data))
+        logger.info("Finished processing robotics namespace configuration request.")
 
     def connect_xArm(self):
         """Request the server to connect to the xArm.
@@ -315,10 +289,10 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
 
         Args:
             pipette_commands (dict): Dictionary mapping pump indices to fluid type and volume tuples.
-                The keys are pump indices (0-3) and values are tuples of (fluid_type, volume_μl).
+                The keys are pump indices (0-3) and values represent volume to pipette.
 
         Examples:
-            >>> robotics_ns.pipette({0: ("MEDIA", 100), 2: ("DRUG", 50)})
+            >>> robotics_ns.pipette({0: 100, 2: 200})
         """
         self.emit("pipette_routine", pipette_commands)
 
@@ -392,7 +366,3 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
             ... })
         """
         self.emit("fill_vials_routine", fill_commands)
-
-
-if __name__ == "__main__":
-    print("Please run eVOLVER.py instead")
