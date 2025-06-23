@@ -119,7 +119,7 @@ class CalibrationData:
             return data
 
     @classmethod
-    def to_file(cls, filename: str, calibration_data: dict):
+    def to_file(cls, filename: str, calibration_data: dict) -> None:
         try:
             with open(filename, "w") as f:
                 json.dump(cls.to_json(calibration_data), f, indent=4)
@@ -133,12 +133,13 @@ class CalibrationData:
             logger.info(f"Calibration data (as string) saved to {filename}")
 
     @classmethod
-    def from_dict(cls, deserialize_data: dict):
+    def from_dict(cls, deserialize_data: dict) -> dict:
         """Create calibration data objects from a dictionary structure.
 
         Converts JSON-formatted data back to CalibrationData objects.
         Handles both single-level (station: CalibrationData) and
         nested (station: {vial: CalibrationData}) formats.
+        Supports both numeric keys and string keys (e.g., "station_0", "vial_5").
 
         Args:
             deserialize_data (dict): Dictionary containing calibration data.
@@ -148,11 +149,10 @@ class CalibrationData:
 
         Raises:
             StopIteration: If deserialize_data is empty.
-            KeyError: If the expected fields are missing in the input data.
 
         Examples:
             >>> data = {
-            ...     "0": {
+            ...     "station_0": {
             ...         "voltage": [1500, 1700, 1900],
             ...         "standards": [35.0, 30.0, 25.0],
             ...         "standard_deviation": [2.0, 1.5, 1.0],
@@ -160,40 +160,55 @@ class CalibrationData:
             ...     }
             ... }
             >>> cal_data = CalibrationData.from_dict(data)
-            >>> type(cal_data[0])
+            >>> type(cal_data["station_0"])
             <class '__main__.CalibrationData'>
         """
+
         calibration_data = {}
+        if not deserialize_data:
+            logger.error("Aborting calibration data conversion, no data detected")
+            return {}
 
-        first_station = next(iter(deserialize_data.values()))
-        is_format_nested = isinstance(first_station, dict) and "voltage" not in first_station
+        first_key = next(iter(deserialize_data.keys()))
+        first_value = deserialize_data[first_key]
+        is_format_nested = "voltage" not in first_value
 
-        for key, value in deserialize_data.items():
-            station = int(key)
+        # Process each entry in the deserialized data
+        for station_key, station_value in deserialize_data.items():
+            if not station_key.startswith("station_"):
+                logger.error(f"Aborting calibration data conversion, invalid station key detected: {station_key}")
+                return {}
 
             if is_format_nested:
-                # Format: {station: {vial: CalibrationData}}
-                calibration_data[station] = {}
-                for vial_key, vial_data in value.items():
-                    vial = int(vial_key)
-                    calibration_data[station][vial] = cls(
+                calibration_data[station_key] = {}
+                for vial_key, vial_data in station_value.items():
+                    if not vial_key.startswith("vial_"):
+                        logger.error(f"Aborting calibration data conversion, invalid vial key detected: {vial_key}")
+                        return {}
+
+                    calibration_data[station_key][vial_key] = cls(
                         voltage=np.array(vial_data["voltage"]),
                         standards=np.array(vial_data["standards"]),
                         standard_deviation=np.array(vial_data["standard_deviation"]),
                         coefficients=np.array(vial_data["coefficients"]),
+                        complete=vial_data.get("complete", False),
+                        step_num=vial_data.get("step_num", 0),
+                        settings=vial_data.get("settings", {}),
                     )
             else:
-                calibration_data[station] = cls(
-                    voltage=np.array(value["voltage"]),
-                    standards=np.array(value["standards"]),
-                    standard_deviation=np.array(value["standard_deviation"]),
-                    coefficients=np.array(value["coefficients"]),
+                calibration_data[station_key] = cls(
+                    voltage=np.array(station_value["voltage"]),
+                    standards=np.array(station_value["standards"]),
+                    standard_deviation=np.array(station_value["standard_deviation"]),
+                    coefficients=np.array(station_value["coefficients"]),
+                    complete=station_value.get("complete", False),
+                    step_num=station_value.get("step_num", 0),
+                    settings=station_value.get("settings", {}),
                 )
-
         return calibration_data
 
     @classmethod
-    def from_file(cls, filename: str):
+    def from_file(cls, filename: str) -> dict:
         """Load calibration data from a JSON file.
 
         Args:
@@ -216,7 +231,19 @@ class CalibrationData:
         return cls.from_dict(deserialize_data)
 
     @classmethod
-    def save_calibration(cls, temporary_calibration_data: dict[str, "CalibrationData"], calibration_directory: str, type: str):
+    def save_calibration(
+        cls, temporary_calibration_data: dict[str, "CalibrationData"], calibration_directory: str, type: str
+    ) -> None:
+        """Save the current state of calibration data to a temporary file.
+
+        Args:
+            temporary_calibration_data (dict[str, CalibrationData]): Dictionary mapping station/vial IDs to their calibration data.
+            calibration_directory (str): Directory to save the calibration data.
+            type (str): Type of calibration data ("temp" or "od").
+
+        Returns:
+            None
+        """
         logger.info("Backing up current state of calibration.")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         filename = os.path.join(calibration_directory, f"calibration_data_{type}_{timestamp}_INCOMPLETE.json")
@@ -234,7 +261,6 @@ class GraphCalibration:
     Creates calibration graphs with measured points, error bars, and fitted lines.
 
     Attributes:
-        container_type (str): Type of container being calibrated (e.g., "Vial", "SmartStation").
         title (str): Title for the calibration plot.
         units (str): Units for the calibration (e.g., "OD600", "Celsius").
         row (int): Number of rows in the subplot grid.
@@ -244,7 +270,6 @@ class GraphCalibration:
         sample_num (int): Number of points to sample for the fitted curve (default: 500).
     """
 
-    container_type: str
     title: str
     units: str
     row: int
@@ -253,7 +278,7 @@ class GraphCalibration:
     start: int = field(default=0)
     sample_num: int = field(default=500)
 
-    def graph(self, func: Callable, calibration_data: dict[str, CalibrationData]):
+    def graph(self, func: Callable, calibration_data: dict[str, CalibrationData]) -> None:
         """Generate calibration graphs for the provided data.
 
         Creates a grid of subplots, each showing a calibration curve for one object
@@ -267,7 +292,6 @@ class GraphCalibration:
 
         Examples:
             >>> grapher = GraphCalibration(
-            ...     container_type="SmartStation",
             ...     title="Temperature",
             ...     units="Celsius",
             ...     row=2,
@@ -283,8 +307,8 @@ class GraphCalibration:
 
         row = 0
         col = 0
-        for object_id, data in calibration_data.items():
-            axs[row, col].set_title(f"{self.container_type}:{object_id}", fontsize=13)
+        for object_key, data in calibration_data.items():
+            axs[row, col].set_title(f"{object_key.upper()}", fontsize=13)
             axs[row, col].set_ylabel("ADC/Voltage", fontsize=12)
             axs[row, col].set_xlabel(f"Reference Units: {self.units}", fontsize=12)
             axs[row, col].scatter(data.standards, data.voltage, s=15, color="black")

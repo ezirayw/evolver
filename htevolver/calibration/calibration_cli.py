@@ -37,7 +37,7 @@ def get_calibration_options():
 
     parser.add_argument(
         "-f",
-        "--file",
+        "--calibration_file",
         action="store",
         type=argparse.FileType("r"),
         required=False,

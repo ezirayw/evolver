@@ -7,8 +7,8 @@ class ServerResultCodes(Enum):
     SUCCESS = 0
     NOT_READY = 1
     EXIT_ROUTINE = 2
+    REQUEST_ERROR = 5
     ROBOTICS_ERROR = 3
-    ROUTINE_ERROR = 4
 
 
 class FluidTypes(Enum):
@@ -30,13 +30,15 @@ class RoboticsState(Enum):
 
 class RoboticsRoutines(Enum):
     NO_ROUTINE = 0
-    DILUTION = 1
+    INFLUX = 1
     PIPETTE = 2
     FILLING_VIALS_PUMPS = 3
     FILLING_VIALS_IPP = 4
     PRIMING_INFLUX = 5
     PRIMING_EFFLUX = 6
     PUMP_INITIALIZE = 7
+    HOME = 8
+    STANDBY = 9
 
 
 class CommandTags(Enum):

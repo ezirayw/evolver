@@ -4,9 +4,10 @@ import time
 
 import socketio
 
+from htevolver.exceptions import ClientError
 from htevolver.htevolver_client.evolver_namespace_client import EvolverClientNamespace
 from htevolver.htevolver_client.robotics_namespace_client import RoboticsClientNamespace
-from htevolver.shared import HTEvolverStatus
+from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,10 @@ class HTEvolverClient:
             >>> client.connect()
             >>> # Now the client is connected to the server
         """
-        self.robotics.request_robotics_status()
-        self.robotics.request_robotics_config()
-        self.robotics.connect_xArm()
-        self.robotics.enable_pumps()
+        self.robotics._request_robotics_status()
+        self.robotics._request_robotics_config()
+        self.robotics._connect_xArm()
+        self.robotics._enable_influx()
 
     def disconnect(self) -> None:
         """Disconnect from HTeVOLVER.
@@ -100,41 +101,55 @@ class HTEvolverClient:
             >>> client.disconnect()
             >>> # Connection is now closed
         """
-        self.robotics.disconnect_xArm()
-        self.robotics.disable_pumps()
+        self.robotics._disconnect_xArm()
+        self.robotics._disable_influx()
         self.sio.disconnect()
         logger.info("Disconnected from the HTeVOLVER server")
 
-    def override(self, override_parameter, override_data):
+    def override(self, override_parameter: str, override_data: dict | int):
         """Override parameters in the robotics namespace.
 
-        Sends an override request to the robotics namespace on the server.
-        This method allows changing specific parameters in the robotics system configuration
-        or state at runtime.
+        Sends an override request to the robotics namespace on the server. Allows changing specific states & properties
+        of the robotics namespace during runtime. Useful for manual intervention or updating status during culture routines.
 
         Args:
-            override_parameter (str): The parameter to override (e.g., "state", "config").
-            override_data (dict): Dictionary containing the override data.
+            override_parameter (str): The robotics namespace parameter to override.
+                Must be a valid override parameter (e.g., "state", "config").
+            override_data (dict | int): Desired data to override target robotics namespace parameter.
+
+        Raises:
+            ClientError: Invalid parameter used for override.
 
         Examples:
             >>> # Override the state of the robotics system
-            >>> client.override("state", {"running": False})
+            >>> client.override("state", 0)
             >>> # Override configuration parameters
             >>> client.override("config", {"pipette_speed": 10})
         """
 
-        valid_override_modes: list[str] = ["state", "routine", "config"]
+        valid_parameters: list[str] = ["state", "routine", "config"]
         logger.info("Received request to override robotics namespace status/config.")
-        for override_mode in override_data:
-            if override_mode not in valid_override_modes:
-                logger.error(f"Invalid override operation entered: {override_mode}")
-                return
+        if override_parameter not in valid_parameters:
+            logger.error(f"Aborting override, invalid parameter entered: {override_parameter}")
+            raise ClientError(f"Aborting override, invalid parameter entered: {override_parameter}")
 
-        self.robotics.emit("override", {override_parameter: override_data})
+        if override_parameter == "state":
+            try:
+                RoboticsState(override_data)
+            except ValueError:
+                logger.error(f"Aborting override, invalid state entered: {override_data}")
+
+        if override_parameter == "routine":
+            try:
+                RoboticsRoutines(override_data)
+            except ValueError:
+                logger.error(f"Aborting override, invalid routine entered: {override_data}")
+
+        self.robotics._override({override_parameter: override_data})
         logger.info(f"Sent override command for parameter: {override_parameter} with data: {override_data}")
 
-    def set_temp_calibration(self, station_id: int, filename: str):
-        """Set temperature calibration for a specific station.
+    def set_calibration(self, station_id: int, calibration_parameter: str, filename: str = ""):
+        """Set calibration for a specific station.
 
         Requests the server to load the specified calibration file for
         the given station.
@@ -143,52 +158,75 @@ class HTEvolverClient:
             station_id (int): ID of the station to set calibration for.
             filename (str): Name of the calibration file to load.
 
+        Raises:
+            ClientError: Invalid calibration parameter
         Examples:
-            >>> client.set_temp_calibration(0, "calibration_data_temp_2025-04-13_04-07-12.json")
+            >>> client.set_calibration(0, "calibration_data_temp_2025-04-13_04-07-12.json")
         """
-        logger.info(f"Setting the temperature calibration for SmartStation {station_id} with filename: {filename}")
-        self.evolver.request_calibration("temp", station_id, filename)
+        logger.info(f"Setting SmartStation {station_id} with most recent temp calibration.")
+        if calibration_parameter not in ["od", "temp"]:
+            logger.error(f"Aborting set_calibration, invalid calibration parameter: {calibration_parameter}")
+            raise ClientError(f"Aborting, invalid calibration parameter: {calibration_parameter}")
+        self.evolver.request_calibration(calibration_parameter, station_id)
 
-    def update_temp(self, new_station_temps: dict[int, int]):
+    def update_temp(self, new_temp_setpoints: dict[int, int]):
         """Update temperature settings for specified stations.
 
         Sets the temperature for multiple stations and sends the command to the server.
 
         Args:
-            new_station_temps (dict[int, int]): Dictionary mapping station IDs to temperature settings.
+            new_station_temps (dict[int, int]): Dictionary mapping SmartStation IDs to new temperature setpoints.
+
+        Raises:
+            ClientError: Invalid temperature setpoint.
 
         Examples:
             >>> client.update_temp({0: 30, 2: 25})  # Set station 0 to 30°C and station 2 to 25°C
         """
         # TODO convert celsius back into raw value
-        station_temps: list[int] = [0] * 4
-        for station_index in range(4):
-            if station_index in new_station_temps:
-                self.evolver.stations[station_index].temp_setting = new_station_temps[station_index]
-            station_temps[station_index] = self.evolver.stations[station_index].temp_setting
-        self.evolver.send_command("temp", station_temps, immediate=True, recurring=True)
+        for station_id, new_temp in new_temp_setpoints.items():
+            if new_temp > 50 or new_temp < 10:
+                logger.error(
+                    f"Aborting update_temp, invalid temperature value detected for SmartStation {station_id}: {new_temp}"
+                )
+                raise ClientError(
+                    f"Aborting update_temp, invalid temperature value detected for SmartStation {station_id}: {new_temp}"
+                )
 
-    def update_stir(self, new_station_rpms: dict[int, float]):
+        temp_command: list[int] = [0] * 4
+        for station_id in range(4):
+            if station_id in new_temp_setpoints:
+                self.evolver.stations[station_id].temp_setting = new_temp_setpoints[station_id]
+            temp_command[station_id] = self.evolver.stations[station_id].temp_setting
+        self.evolver.send_command("temp", temp_command, immediate=True, recurring=True)
+
+    def update_stir(self, new_stir_speeds: dict[int, float]):
         """Update stirring settings for specified stations.
 
         Sets the stirring speed for multiple stations and sends the command to the server.
         The input RPM values are converted to raw PWM values by multiplying by 500, the max PWM.
 
         Args:
-            new_station_rpms (dict[int, float]): Dictionary mapping station IDs to stirring speeds
-                (in RPM or fractional units).
+            new_station_rpms (dict[int, float]): Dictionary mapping SmartStation IDs to new stir speeds.
 
+        Raises:
+            ClientError:
         Examples:
             >>> client.update_stir({0: 0.8, 1: 0.5})  # Set station 0 to 80% and station 1 to 50% of max speed
         """
-        station_rpms: list[int] = [0] * 4
-        for station_index in range(4):
-            if station_index in new_station_rpms:
-                self.evolver.stations[station_index].stir_setting = new_station_rpms[station_index]
-            stir_PWM_value = int(self.evolver.stations[station_index].stir_setting * 500)
-            station_rpms[station_index] = stir_PWM_value
+        for station_id, new_stir in new_stir_speeds.items():
+            if new_stir < 0:
+                logger.error(f"Aborting update_stir, negative stir speed detected for SmartStation {station_id}: {new_stir}")
+                raise ClientError(f"Aborting update_stir, negative stir speed detected for SmartStation {station_id}: {new_stir}")
 
-        self.evolver.send_command("stir", station_rpms, immediate=True, recurring=True)
+        stir_command: list[int] = [0] * 4
+        for station_id in range(4):
+            if station_id in new_stir_speeds:
+                self.evolver.stations[station_id].stir_setting = stir_command[station_id]
+            stir_speed = int(self.evolver.stations[station_id].stir_setting * 500)
+            stir_command[station_id] = stir_speed
+
+        self.evolver.send_command("stir", stir_command, immediate=True, recurring=True)
 
     def get_temp_data(
         self, station_list: list[int], num_data_points: int = 1
@@ -243,6 +281,7 @@ class HTEvolverClient:
         """
         return_data: dict[int, dict[int, tuple[tuple[float | int, float], ...]]] = {}
         for station_id in station_list:
+            return_data[station_id] = {}
             for vial_id in range(18):
                 data_entry: list[tuple[float | int, float],] = []
                 for index in range(num_data_points):
@@ -327,22 +366,165 @@ class HTEvolverClient:
             return_data[station_id] = {vial_id: tuple(od_data) for vial_id, od_data in voltage_readings[station_id].items()}
         return return_data
 
-    def request_robotics_config(self, config_parameter: str | None = None):
+    def request_robotics_config(self, config_parameter: str = "") -> dict:
+        """Request robotics configuration from the server.
+
+        Fetches the current robotics configuration from the server. If a specific
+        parameter is requested, returns only that parameter's value.
+
+        Args:
+            config_parameter (str): Specific configuration parameter to retrieve.
+                Defaults to empty.
+
+        Returns:
+            dict: Either the complete robotics configuration dictionary or
+                the value of the specified parameter if found, empty dictionary otherwise.
+
+        Examples:
+            >>> # Get the entire robotics configuration
+            >>> config = client.request_robotics_config()
+            >>> # Get a specific configuration parameter
+            >>> pipette_config = client.request_robotics_config("pipette_head")
+        """
         logger.info("HT-eVOLVER client requesting robotics configuration.")
-        self.robotics.request_robotics_config()
+        self.robotics._request_robotics_config()
         if config_parameter:
-            return self.robotics.server_config.get(config_parameter, None)
+            return self.robotics.server_config.get(config_parameter, {})
         else:
             return self.robotics.server_config
 
-    def pipette(self, pipette_commands: dict):
+    def pipette(self, pipette_commands: dict[int, int]):
+        """Execute a pipetting operation.
+
+        Sends a pipette command to the robotics system to aspirate and dispense
+        fluids with the specified volumes.
+
+        Args:
+            pipette_commands (dict): Map pipette volumes (in μL) to PipetteHead Pump ID keys.
+
+        Examples:
+            >>> # Pipette 100μL from pump 0 and 200μL from pump 2
+            >>> client.pipette({0:100, 2:200})
+        """
         logger.info(f"HT-eVOLVER client sending the following PipetteHead pipettte command: {pipette_commands}")
-        self.robotics.pipette(pipette_commands)
+        self.robotics._pipette(pipette_commands)
 
-    def prime_pipettehead(self, prime_commands: list):
+    def prime_pipettehead(self, prime_commands: list[int]):
+        """Prime the specified syringe pumps.
+
+        Sends a command to prime the specified syringe pumps. Priming fills the tubing for influx usage. For each syringe pump
+        specified, priming cycle will pipette set volume for all configured ports to fill tubing lines. Required prior to running
+        influx operations.
+
+        Args:
+            prime_commands (list): List of PipetteHead Pump IDs to prime.
+                Example: [0, 1] to prime pumps 0 and 1.
+
+        Examples:
+            >>> # Prime pumps 0 and 1
+            >>> client.prime_pipettehead([0, 1])
+        """
         logger.info(f"HT-eVOLVER client sending the following PipetteHead prime command: {prime_commands}")
-        self.robotics.prime_syringe_pumps(prime_commands)
+        self.robotics._prime_pipettehead(prime_commands)
 
-    def dilution(self, dilution_commands: dict):
-        logger.info(f"HT-eVOLVER client sending the following dilutions command: {dilution_commands}")
-        self.robotics.dilutions(dilution_commands)
+    def influx(self, influx_commands: dict):
+        """Execute influx in specific vials across SmartStations.
+
+        Sends a influx command to the robotics system to pipette target fluids into specified SmartStation vials.
+        Vials can receive influx inputs from any configured PipetteHead syringe pump. Influx volume inputs cannot
+        exceed the physical capacity of the syringe pump.
+
+        Args:
+            influx_commands (dict): Nested dictionary mapping influx volumes to SmartStation IDs & vial IDs
+                to fluid types to volumes. Structure: {station_id: {vial_id: {"FLUID_TYPE": volume}}}.
+                Example: {0: {3: {"MEDIA": 100, "DRUG": 50}}} adds 100μL of MEDIA and 50μL of DRUG
+                to vial 3 in station 0.
+
+        Examples:
+            >>> # Add fluids to multiple vials across stations
+            >>> client.influx({
+            ...     0: {  # Station 0
+            ...         3: {"MEDIA": 100, "DRUG": 50},  # Vial 3 gets MEDIA and DRUG
+            ...         4: {"MEDIA": 150}  # Vial 4 gets only MEDIA
+            ...     }
+            ... })
+        """
+        logger.info(f"HT-eVOLVER client sending the following influxs command: {influx_commands}")
+        self.robotics._influx(influx_commands)
+
+    def influx_ipp(self, influx_commands: dict[int, int]):
+        """Execute influx using millifluidic boards for target SmartStations.
+
+        Sends a influx-oriented IPP command to target SmartStations by operating IPPs in reverse. Enables rapid
+        filling of SmartStation vials for experiment setup. Requires desired fluid source to be connected to millifluidic
+        waste port(s), so not as flexible as using influx() in terms of fluid source multiplexing. Volume cannot exceed
+        maximum vial culture capacity of 6mL.
+
+        Args:
+            influx_commands (dict): Dictionary mapping SmartStation IDs to desired influx volume (uL).
+
+        Examples:
+        >>> # Add 1000uL into all vials in SmartStation:0 and 500uL into all vials in SmartStation:3
+            >>> client.efflux({0: 1000, 3: 500})
+        """
+        for station_id, volume in influx_commands.items():
+            if volume > 6000:
+                logger.error(
+                    f"Aborting influx_ipp, volume greater than vial capacity detected for SmartStation {station_id}: {volume}"
+                )
+                raise ClientError(
+                    f"Aborting influx_ipp, volume greater than vial capacity detected for SmartStation {station_id}: {volume}"
+                )
+        logger.info(f"HT-eVOLVER client sending the following influxs command: {influx_commands}")
+        self.evolver._run_ipps(influx_commands)
+
+    def efflux(self, efflux_commands: dict[int, int]):
+        """Execute efflux for target SmartStations
+
+        Sends an IPP command to target SmartStations to run efflux. Efflux volume is the same across all vials for the specified
+        SmartStation.
+
+        Args:
+            efflux_commands (dict): Dictionary mapping SmartStation IDs to desired efflux volume (uL).
+
+        Examples:
+            >>> # Remove 1000uL from all vials in SmartStation:0 and 500uL from all vials in SmartStation:3
+            >>> client.efflux({0: 1000, 3: 500})
+        """
+        for station_id, volume in efflux_commands.items():
+            if volume < 0:
+                logger.error(f"Aborting efflux, negative volume detected for SmartStation {station_id}: {volume}")
+                raise ClientError(f"Aborting efflux, negative volume detected for SmartStation {station_id}: {volume}")
+        self.evolver._run_ipps(efflux_commands)
+
+    def pause(self):
+        """Pause active robotic routines on HT-eVOLVER.
+
+        Sends a pause request to suspend routines. Useful for facilitating manual interventions during experiments,
+        like exchanging fluid reservoirs, culture sampling, and/or troubleshooting.
+
+        Examples:
+            >>> client.pause()
+        """
+        self.robotics._pause()
+
+    def resume(self):
+        """Resumes recently paused robotic routines on HT-eVOLVER.
+
+        Sends a resume request to resume paused routines. Useful for facilitating manual interventions during experiments,
+        like exchanging fluid reservoirs, culture sampling, and/or troubleshooting.
+
+        Examples:
+            >>> client.resume()
+        """
+        self.robotics._resume()
+
+    def stop(self):
+        """Kills active robotics routines on HT-eVOLVER.
+
+        Sends a stop request to gracefully exit active robotics routines. Useful for conditionally ending experiments.
+
+        Examples:
+            >>> client.stop()
+        """
+        self.robotics._stop()

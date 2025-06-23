@@ -34,6 +34,15 @@ class PumpProtocol(Protocol):
         """
         ...
 
+    @staticmethod
+    def find_serial_port(pump_id: int) -> str:
+        """Find the pump's serial port connection
+
+        Automatic detection of the serial port the pump is using for communication.
+        Obscures low-level HT-eVOLVER setup by user and enables automatic PipetteHead setup by server
+        """
+        ...
+
     def enable(self) -> None:
         """Enable pump hardware.
 

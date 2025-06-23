@@ -57,6 +57,9 @@ class xArm:
     yaw: int
     speed: int
     mvacc: int
+    home_position: xArmCoordinate
+    standby_position: xArmCoordinate
+    intermediate_position: xArmCoordinate
     warning_code: int = field(default=0)
     error_code: int = field(default=0)
     state: int = field(default=0)
@@ -88,16 +91,24 @@ class xArm:
             arm = xArm.create(config)
             ```
         """
-        return cls(
-            arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=True),
-            ip=config["ip"],
-            connected=config.get("connect", False),
-            roll=config["roll"],
-            pitch=config["pitch"],
-            yaw=config["yaw"],
-            speed=config["speed"],
-            mvacc=config["mvacc"],
-        )
+        try:
+            return cls(
+                arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=not config["enabled"]),
+                ip=config["ip"],
+                connected=config.get("connect", False),
+                roll=config["roll"],
+                pitch=config["pitch"],
+                yaw=config["yaw"],
+                speed=config["speed"],
+                mvacc=config["mvacc"],
+                home_position=xArmCoordinate(x=config["home_x"], y=config["home_y"], z=config["home_z"]),
+                standby_position=xArmCoordinate(x=config["standby_x"], y=config["standby_y"], z=config["standby_z"]),
+                intermediate_position=xArmCoordinate(
+                    x=config["intermediate_position_x"], y=config["intermediate_position_y"], z=config["intermediate_position_z"]
+                ),
+            )
+        except Exception as e:
+            raise xArmError("Error trying to create xArm wrapper instance") from e
 
     def setup(self):
         """Setup the xArm with standard parameters.
@@ -133,23 +144,6 @@ class xArm:
         Closes the connection to the xArm controller.
         """
         self.arm_api.disconnect()
-
-    def reset(self):
-        """Reset the xArm to clear errors.
-
-        Reconnects if disconnected, clears warnings and errors, enables motion,
-        and aligns the end effector to be parallel to the ground to avoid kinematic errors.
-        """
-        if not self.connected:
-            self.arm_api.connect()
-        self.arm_api.clean_warn()
-        self.arm_api.clean_error()
-        self.arm_api.motion_enable(True)
-        self.arm_api.set_state(0)
-        code, angles = self.arm_api.get_servo_angle()
-        if code == 0:
-            angles[3] = -(angles[1] + angles[2])
-            self.arm_api.set_servo_angle(angle=angles, wait=True)
 
     def update(self, xarm_config: dict):
         """Update arm configuration from a dictionary.

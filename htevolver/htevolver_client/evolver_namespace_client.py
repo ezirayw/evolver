@@ -250,13 +250,14 @@ class EvolverClientNamespace(socketio.ClientNamespace):
 
             self.broadcast_counter += 1
 
-    def on_get_config(self, data):
-        """Handle server configuration data"""
+    def request_config(self):
+        """Request eVOLVER server configuration"""
 
-        self.evolver_conf = data
-        logger.info("Received server configuration data.")
+        logger.info("Requesting eVOLVER namespace configuration.")
+        self.emit("request_config", callback=lambda config_data: setattr(self, "evolver_config", config_data))
+        logger.info("Finished processing eVOLVER namespace configuration request.")
 
-    def on_get_calibration(self, data):
+    def request_calibration_callback(self, request_data: dict):
         """Handle calibration data received from the server.
 
         Processes calibration data received from the server, updating
@@ -265,38 +266,48 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         Args:
             data (dict): Calibration data received from the server.
         """
-        if data["calibration_data"]:
-            calibration_data = CalibrationData.from_dict(data["calibration_data"])
-            if data["parameter"] == "temp":
-                self.stations[data["station_id"]].temp_cal = calibration_data[data["station_id"]]
-            if data["parameter"] == "od":
-                self.stations[data["station_id"]].od_cal = calibration_data[data["station_id"]]
+        logger.info("Requesting eVOLVER namespace calibration data.")
+        if request_data["calibration_data"]:
+            calibration_data = CalibrationData.from_dict(request_data["calibration_data"])
+            if request_data["parameter"] == "temp":
+                self.stations[request_data["station_id"]].temp_cal = calibration_data[request_data["station_id"]]
+            if request_data["parameter"] == "od":
+                self.stations[request_data["station_id"]].od_cal = calibration_data[request_data["station_id"]]
+        logger.info("Finished processing eVOLVER namespace calibration data request.")
 
-    def request_config(self):
-        """Request eVOLVER server configuration"""
-        logger.info("Requesting current server configuration data")
-        self.emit("request_config")
-
-    def request_calibration(self, parameter: str, station_id: int, filename: str):
+    def request_calibration(
+        self,
+        parameter: str,
+        station_id: int,
+        filename: str = "",
+    ):
         """Request calibration data from the server.
 
         Asks the server to send calibration data for a specific parameter and station.
+        If filename not supplied, most recent calibration for given parameter is requested.
 
         Args:
             parameter (str): Type of calibration data ("od" or "temp").
             station_id (int): ID of the station.
             filename (str): Name of the calibration file to request.
+                Defaults to an empty string.
 
         Examples:
-            >>> evolver_ns.request_calibration("temp", 0, "calibration_data_temp_2025-04-13_04-07-12.json")
+            >>> evolver_ns.request_calibration("temp", 0)
+            >>> evolver_ns.request_calibration("temp", 0, filename="calibration_data_temp_2025-04-13_04-07-12.json")
         """
         logger.info(f"Requesting {parameter} calibration data for SmartStation {station_id}")
-        self.emit("request_calibration", {"parameter": parameter, "station_id": station_id, "filename": filename})
+        self.emit(
+            "request_calibration",
+            {"parameter": parameter, "station_id": station_id, "filename": filename},
+            callback=self.request_calibration_callback,
+        )
+        logger.info("Finished processing eVOLVER namespace calibration request.")
 
     def send_calibration(self, serialized_calibration_data: dict, metadata: dict):
         """Send calibration data to the server.
 
-        Transmits calibration data to the server for storage.
+        Transmits calibration data to the server for storage. Mainly used following hardware calibration protocol.
 
         Args:
             serialized_calibration_data (dict): Serialized calibration data to send to the server.
@@ -309,13 +320,12 @@ class EvolverClientNamespace(socketio.ClientNamespace):
             ...     {"station_id": 0, "parameter": "temp", "timestamp": "2025-04-13_04-07-12"}
             ... )
         """
-        self.emit("get_calibration", {"data": serialized_calibration_data, "metadata": metadata})
-        logger.info(
-            f"Recently generated {metadata['parameter']} calibration data for SmartStation {metadata['station_id']} sent to server."
-        )
+        logger.info(f"Sending {metadata['parameter']} calibration data for SmartStation {metadata['station_id']} sent to server.")
+        self.emit("save_calibration", {"data": serialized_calibration_data, "metadata": metadata})
+        logger.info("Finised procesing eVOLVER namesapce send_calibration request.")
 
     def save_data(self):
-        """Save the current sensor data to disk.
+        """Save the current sensor data to memory.
 
         Writes the latest temperature and OD readings to text files.
         """
@@ -376,17 +386,14 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         for station_id, frequency in frequency_commands.items():
             self.stations[station_id].efflux_board.ipp_frequency = frequency
 
-    def run_ipps(self, ipp_commands: dict[int, int]):
+    def _run_ipps(self, ipp_commands: dict[int, int]):
         """Actuate integrated peristaltic pumps.
 
         Actuates the IPPs to pump desired volumes across one or more SmartStations.
         Positive values indicate influx behavior while negative values indicate efflux behavior.
 
         Args:
-            ipp_commands (dict[int, int]): Dictionary mapping station IDs to volumes (mL).
-
-        Examples:
-            >>> evolver_ns.run_ipps({0: 10, 2: -5})  # Pump 10mL in for station 0, remove 5mL from station 2
+            ipp_commands (dict[int, int]): Dictionary mapping SmartStation IDs to volumes (uL).
         """
         polarity_commands = [1] * 4
         duration_commands = [0] * 4

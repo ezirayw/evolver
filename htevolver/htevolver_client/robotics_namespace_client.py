@@ -27,8 +27,7 @@ def routine_decorator(func: Callable):
     """
 
     def wrapper(self, *args, **kwargs):
-        if self.check_ready():
-            # run the target function
+        if self._check_ready():
             func(self, *args, **kwargs)
             logger.info(f"Initiating the {func.__name__.upper()} with the command: {args[0]}")
         else:
@@ -63,12 +62,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.ack: bool = False
 
     def on_connect(self):
-        """Handle connection to the server.
-
-        Called when a connection is established to the server.
-        Automatically requests status, configuration, and type information.
-        """
-
+        """Handle connection to the server."""
         logger.info("Client connected to HTeVOVLER server via robotics namespace")
 
     def on_disconnect(self):
@@ -76,16 +70,13 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         logger.info("Client disconnected from HTeVOLVER server via robotics namespace")
 
     def on_reconnect(self):
-        """Handle reconnection to the server.
-
-        Called when a connection is re-established after a disconnection.
-        """
+        """Handle reconnection to the server."""
         logger.info("Client reconnected to HTeVOLVER server via robotics namespace")
 
     def on_broadcast(self, status: dict):
-        """Handle status broadcast data from the server.
+        """Handle broadcast data from the server.
 
-        Processes status broadcast data received from the server, which includes
+        Processes broadcast data received from the server, which includes
         the current state of the robotics system, active operations, and
         the status of the xArm and PipetteHead.
 
@@ -97,161 +88,99 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         self.status.robotics = status
         logger.info(f"Robotics namespace broadcast: {self.status.robotics}")
 
-    def acknowledge(self, request_name):
-        """Acknowledge receipt of status request.
-
-        Called by the server as a callback to confirm that a status request was received.
-        Sets the ack flag to True which unblocks the check_ready() method.
-        """
-        self.ack: bool = True
-        logger.info(f"{request_name} complete")
-
-    def request_robotics_status(self):
+    def _request_robotics_status(self):
         """Request status information from the server.
 
-        Asks the server to send current robotics status information.
-        The server will respond by calling the on_get_status() callback
-        with the current state of the robotics system.
-
-        Examples:
-            >>> robotics_ns.request_robotics_status()
+        Requests the status information from robotics namespace server. Server response
+        is processed by supplied callback lambda function.
         """
         logger.info("Requesting robotics namespace status from HTeVOLVER server.")
         self.emit("request_config", callback=lambda status_data: setattr(self, "status", status_data))
         logger.info("Finished processing robotics namespace status request.")
 
-    def request_robotics_config(self):
+    def _request_robotics_config(self):
         """Request configuration from the server.
 
-        Asks the server to send current robotics configuration information.
-        The server will respond by calling the on_get_config() callback with
-        the current robotics configuration data from robotics_conf.yml.
-
-        Examples:
-            >>> robotics_ns.request_robotics_config()
+        Requests the current configuration of the robotics namespace server. Server response
+        is processed by supplied callback lambda function.
         """
         logger.info("Requesting robotics namespace configuration from HTeVOLVER server.")
         self.emit("request_config", callback=lambda config_data: setattr(self, "server_config", config_data))
         logger.info("Finished processing robotics namespace configuration request.")
 
-    def connect_xArm(self):
+    def _connect_xArm(self):
         """Request the server to connect to the xArm.
 
-        Asks the server to establish a connection with the robotic arm.
-        Triggers arm.connect() on the server, which connects to the xArm
-        hardware via the XArmAPI interface.
-
-        Examples:
-            >>> robotics_ns.connect_xArm()
+        Requests server to establish a connection with the xArm via its Python SDK API interface.
         """
         self.emit("connect_xArm")
         logger.info("Connecting xArm to HTeVOLVER server")
 
-    def disconnect_xArm(self):
+    def _disconnect_xArm(self):
         """Request the server to disconnect to the xArm.
 
-        Asks the server to disconnect with the robotic arm.
-        Triggers arm.disconnect() on the server, which disconnects the xArm
-        hardware via the XArmAPI interface.
-
-        Examples:
-            >>> robotics_ns.disconnect_xArm()
+        Requests server to disconnect from the xArm via its Python SDK API interface.
         """
         self.emit("disconnect_xArm")
         logger.info("Disconnecting xArm from HTeVOLVER server")
 
-    def enable_pumps(self):
-        """Request the server to connect to syringe pumps.
+    def _enable_influx(self):
+        """Request the server to enable PipetteHead syringe pumps.
 
-        Asks the server to enable PipetteHead syringe pumps. Triggers
-        pipette_head.enable() on the server, which enables execution of
-        syringe pump commands.
-
-        Examples:
-            >>> robotics_ns.enable_pumps()
+        PipetteHead must be enabled prior to running any influx operations.
         """
 
-        self.emit("enable_pumps")
+        self.emit("enable_influx")
         logger.info("Enabling PipetteHead syringe pumps on HTeVOLVER server")
 
-    def disable_pumps(self):
-        """Request the server to connect to syringe pumps.
+    def _disable_influx(self):
+        """Request the server to disable PipetteHead syringe pumps.
 
-        Asks the server to disable PipetteHead syringe pumps. Triggers
-        pipette_head.disable() on the server, which disables execution of
-        syringe pump commands.
-
-        Examples:
-            >>> robotics_ns.disable_pumps()
+        Useful for preventing unwanted influx operations.
         """
-
-        self.emit("disable_pumps")
+        self.emit("disable_influx")
         logger.info("Disabling PipetteHead syringe pumps on HTeVOLVER server")
 
-    def override_status(self, override_commands: dict):
+    def _override(self, override_commands: dict):
         """Override the robotics status on the server.
 
-        Allows manual intervention to change the robotics state.
-        Dynamically sets attributes based on the provided
-        dictionary, allowing recovery from error states.
+        Requests server to override robotics namespace state, routine, and configuration.
 
         Args:
             override_commands (dict): Dictionary of status values to override.
                 Keys should match attributes in the RoboticsServerNamespace class.
-
-        Examples:
-            >>> robotics_ns.override_status({"state": RoboticsState.READY.value})
         """
-        self.emit("on_override_status", override_commands)
+        self.emit("override", override_commands)
         logger.info(f"Overriding robotics namespace state on HTeVOLVER server with: {override_commands}")
 
-    def pause_experiment(self):
-        """Pause the current experiment.
+    def _pause(self):
+        """Pause active routines in the robotics namespace backend.
 
-        Requests the server to pause the current robotics operation.
-        Triggers pause_robotics() on the server, which:
-        1. Sets the robotics state to PAUSE if currently BUSY
-        2. Pauses the PipetteHead by terminating current commands
-        3. Pauses the xArm by setting its state to PAUSE (3)
-
-        Examples:
-            >>> robotics_ns.pause_experiment()
+        Requests the server to put the robotics namespace into a pause state. Suspends any active
+        PipetteHead and xArm operations.
         """
         self.emit("pause_robotics")
         logger.info("Paused experiment")
 
-    def resume_experiment(self):
-        """Resume the paused experiment.
+    def _resume(self):
+        """Resumes recently paused routines in the robotics namespace backend.
 
-        Requests the server to resume a previously paused robotics operation.
-        Triggers resume_robotics() on the server, which:
-        1. Sets the robotics state back to BUSY if previously PAUSE
-        2. Resumes the PipetteHead operations
-        3. Resumes the xArm by setting its state to RUNNING (0)
-
-        Examples:
-            >>> robotics_ns.resume_experiment()
+        Requests the server to put the robotics namespace into a resume state. Resumes paused
+        PipetteHead and xArm operations.
         """
         self.emit("resume_robotics")
         logger.info("Resumed experiment")
 
-    def stop_experiment(self):
-        """Stop the current experiment.
+    def _stop(self):
+        """Kills active robotics routines in the robotics namespace backend.
 
-        Requests the server to completely stop the current robotics operation.
-        Triggers stop_robotics() on the server, which:
-        1. Sets the robotics state to STOP
-        2. Terminates all syringe pump commands
-        3. Puts the xArm into stop state
-        4. Any active routines will detect this state and safely exit
-
-        Examples:
-            >>> robotics_ns.stop_experiment()
+        Requests the server to put the robotics namespace into a stop state. Kills PipetteHead and xArm
+        operations and gracefully exits active robotic routines.
         """
         self.emit("stop_robotics")
         logger.info("Stopped experiment")
 
-    def check_ready(self):
+    def _check_ready(self):
         """Check if the robotics system is ready for a new routine.
 
         Verifies that the robotics system is not currently executing a routine.
@@ -260,12 +189,9 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         Returns:
             bool: True if the system is ready (no active routine), False otherwise.
 
-        Examples:
-            >>> if robotics_ns.check_ready():
-            ...     robotics_ns.pipette(pipette_commands)
         """
         self.ack = False
-        self.request_robotics_status()
+        self._request_robotics_status()
         while not self.ack:
             time.sleep(0.1)
 
@@ -277,92 +203,58 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
             return False
 
     @routine_decorator
-    def pipette(self, pipette_commands: dict):
-        """Execute a pipetting routine.
+    def _pipette(self, pipette_commands: dict[int, int]):
+        """Execute a basic pipette operation with the PipetteHead
 
         Requests the server to perform a pipetting operation with the PipetteHead.
-        Triggers the @routine_decorator(RoboticsRoutines.PIPETTE) decorated function
-        on the server, which:
-        1. Sets the state to BUSY
-        2. Executes pipette_event() with the provided volumes
-        3. Coordinates the xArm movement and PipetteHead aspirate/dispense operations
+        Puts the robotics namespace into a busy state.
 
         Args:
-            pipette_commands (dict): Dictionary mapping pump indices to fluid type and volume tuples.
-                The keys are pump indices (0-3) and values represent volume to pipette.
-
-        Examples:
-            >>> robotics_ns.pipette({0: 100, 2: 200})
+            pipette_commands (dict): Dictionary containing pipette commands.
+                Key value pairs map to PipetteHead Pump ID and pipette volume.
         """
         self.emit("pipette_routine", pipette_commands)
 
     @routine_decorator
-    def prime_syringe_pumps(self, prime_commands: list[int]):
-        """Prime the syringe pumps.
+    def _prime_pipettehead(self, prime_commands: list[int]):
+        """Execute a PipetteHead priming cycle
 
-        Requests the server to prime the specified syringe pumps, filling the
-        tubing with the appropriate fluid. Triggers the @routine_decorator(RoboticsRoutines.PRIMING_INFLUX)
-        decorated function on the server, which:
-        1. Sets the state to BUSY
-        2. Calls pipette_head.prime() for each specified pump
-        3. Primes the pumps by drawing fluid from reservoirs and dispensing
+        Requests the server to prime the specified syringe pumps on the PipetteHead. Function is expected to be called
+        repeatedly with experimenter input to ensure that lines are completely filled prior to running experiments.
+        Puts the robotics namespace into a busy state.
 
-        Args:
-            prime_commands (list): List containing pump IDs to prime
-
-        Examples:
-            >>> robotics_ns.prime_syringe_pumps([0, 2])  # Prime pumps 0 and 2
+         Args:
+             prime_commands (list): List containing PipetteHead Pump IDs to prime
+             volume (int): Volume to pipette during priming. Defaults to 10mL
         """
-        self.emit("prime_pumps", prime_commands)
+        self.emit("prime_pipettehead", prime_commands)
 
     @routine_decorator
-    def dilutions(self, dilution_commands: dict):
-        """Execute a dilution routine.
+    def _influx(self, influx_commands: dict):
+        """Execute a influx routine across SmartStation vials with the PipetteHead.
 
-        Requests the server to perform a series of dilutions in specific vials.
-        Triggers the @routine_decorator(RoboticsRoutines.DILUTION)
-        decorated function on the server, which:
-        1. Sets the state to BUSY
-        2. Converts commands to the StationPumpCommands format
-        3. Executes influx_snake_helper() to perform the dilutions
-        4. Moves the xArm and PipetteHead to dispense fluids in a snake pattern
+        Requests the server to perform an influx cycle across HT-eVOLVER based on the specified target vials and influx volume
+        inputs. Coordinates xArm to move PipetteHead in a snake pattern across target SmartStations. Puts robotics namespace into
+        a busy state
 
         Args:
-            dilution_commands (dict): Nested dictionary mapping:
+            influx_commands (dict): Nested dictionary mapping:
                 - station_id -> vial_id -> fluid_type -> volume
                 Example structure: {0: {3: {"MEDIA": 100, "DRUG": 50}}}
                 This would add 100μL of MEDIA and 50μL of DRUG to vial 3 in station 0.
-
-        Examples:
-            >>> robotics_ns.dilutions({
-            ...     0: {  # Station 0
-            ...         3: {"MEDIA": 100, "DRUG": 50},  # Vial 3 gets MEDIA and DRUG
-            ...         4: {"MEDIA": 150}  # Vial 4 gets only MEDIA
-            ...     }
-            ... })
         """
-        self.emit("dilution_routine", dilution_commands)
+        self.emit("influx_routine", influx_commands)
 
     @routine_decorator
-    def fill_vials(self, fill_commands: dict):
+    def _fill_vials(self, fill_commands: dict):
         """Fill vials with specified fluids.
 
-        Requests the server to fill all vials in specified stations with fluid.
-        Triggers the @routine_decorator(RoboticsRoutines.FILLING_VIALS_PUMPS)
-        decorated function on the server, which:
-        1. Sets the state to BUSY
-        2. Validates fluid types and volumes
-        3. Creates StationPumpCommands for all vials in the station
-        4. Executes influx_snake_helper() to fill all vials
+        Requests the server to fill all vials within a target SmartStation with influx volume inputs. Only 1 fluid type allowed
+        per SmartStation. Similar to _influx() in how modules operate. Puts robotics namespace into
+        a busy state.
 
         Args:
             fill_commands (dict): Dictionary mapping station IDs to tuples of (fluid_type, volume_μL).
                 This applies the same fluid and volume to ALL vials in the specified stations.
-
-        Examples:
-            >>> robotics_ns.fill_vials({
-            ...     0: ("MEDIA", 1000),  # All vials in station 0 get 1000μL of MEDIA
-            ...     1: ("DRUG", 500)     # All vials in station 1 get 500μL of DRUG
-            ... })
         """
         self.emit("fill_vials_routine", fill_commands)

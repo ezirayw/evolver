@@ -121,7 +121,7 @@ def collect_od_data(
     print()
     logger.info("Place standards in SmartStation vial slots in ascending order according to vial list entered.")
     logger.info(
-        f"Example, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(standards_mask)}."
+        f"Example, standard_0: {standards[0]} OD600 in vial_slot: {min(vial_list)} & standard_{len(standards) - 1}: {standards[-1]} OD600 in vial_slot: {max(vial_list)}."
     )
     while True:
         proceed = input("Ready to continue? [y/n]: ")
@@ -213,7 +213,6 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
         max_values = np.array([np.max(calibration_data[vial_key].voltage) for vial_key in calibration_data])
         max_value = np.max(max_values)
         grapher = GraphCalibration(
-            container_type="vial",
             title="od",
             units="OD600",
             row=3,
@@ -262,7 +261,8 @@ if __name__ == "__main__":
         serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         htevolver_client.evolver.send_calibration(
-            serialized_calibration_data, metadata={"parameter": "od", "timestamp": timestamp, "station_id": station_id}
+            serialized_calibration_data,
+            metadata={"parameter": "od", "timestamp": timestamp, "station_key": f"station_{station_id}"},
         )
 
     htevolver_client.disconnect()

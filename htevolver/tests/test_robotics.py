@@ -66,7 +66,7 @@ def get_options():
         default=False,
     )
 
-    # DILUTION specific arguments
+    # influx specific arguments
     parser.add_argument(
         "-q",
         "--station_ids",
@@ -74,7 +74,7 @@ def get_options():
         nargs="*",
         type=lambda s: int(s),
         required=False,
-        help="List of SmartStation IDs to run dilutions over over (space separated).",
+        help="List of SmartStation IDs to run influxs over over (space separated).",
         default=DEFAULT_STATION_LIST,
     )
 
@@ -86,7 +86,7 @@ def build_pipette_request(pump_list: list[int]) -> dict:
     for pump_id in pump_list:
         while True:
             try:
-                volume_input = int(input(f"Enter pipette volume for PipetteHead Pump ID {pump_id} (µL): "))
+                volume_input = int(input(f"Enter pipette volume for PipetteHead Pump_{pump_id} (µL): "))
                 if volume_input < 0:
                     logger.error("Invalid pipette volume entered, must be positive.")
                 else:
@@ -97,10 +97,10 @@ def build_pipette_request(pump_list: list[int]) -> dict:
     return pipette_commands
 
 
-def build_dilution_request(use_liquid: bool, station_list: list[int], fluid_types: list[str]) -> dict:
-    dilution_commands: dict[int, dict[int, dict[str, int]]] = {}
+def build_influx_request(use_liquid: bool, station_list: list[int], fluid_types: list[str]) -> dict:
+    influx_commands: dict[int, dict[int, dict[str, int]]] = {}
     for station_id in station_list:
-        dilution_commands[station_id] = {}
+        influx_commands[station_id] = {}
         vial_list: list[int] = []
 
         while True:
@@ -118,7 +118,7 @@ def build_dilution_request(use_liquid: bool, station_list: list[int], fluid_type
                 logger.exception("Invalid type entered, try again")
 
         for vial in vial_list:
-            dilution_commands[station_id][vial] = {}
+            influx_commands[station_id][vial] = {}
             while True:
                 fluid_input = input(f"Enter fluid input for SmartStation {station_id}, vial {vial} (space-separated): ")
                 fluid_list = fluid_input.split(" ")
@@ -131,16 +131,16 @@ def build_dilution_request(use_liquid: bool, station_list: list[int], fluid_type
             for fluid in fluid_list:
                 while True:
                     try:
-                        volume_input = int(input(f"Enter dilution volume to use for {fluid}: "))
+                        volume_input = int(input(f"Enter influx volume to use for {fluid}: "))
                         if volume_input < 0:
-                            logger.warning("Invalid dilution volume entered, must be under positive.")
+                            logger.warning("Invalid influx volume entered, must be under positive.")
                         else:
-                            dilution_commands[station_id][vial][fluid] = volume_input
+                            influx_commands[station_id][vial][fluid] = volume_input
                             break
                     except ValueError:
                         logger.exception("Invalid type entered, try again")
 
-    return dilution_commands
+    return influx_commands
 
 
 if __name__ == "__main__":
@@ -215,7 +215,7 @@ if __name__ == "__main__":
             logger.error("Aborting, must enter list of PipetteHead Pump IDs to prime.")
             sys.exit()
 
-    if robotic_function == "DILUTION":
+    if robotic_function == "INFLUX":
         pipettehead_config = htevolver_client.request_robotics_config("pipette_head")
         fluid_types: list[str] = []
         if pipettehead_config:
@@ -224,7 +224,7 @@ if __name__ == "__main__":
 
             logger.info(f"PipetteHead configured with the fluid type: {fluid_types}")
 
-        dilution_request = build_dilution_request(use_liquid, station_list, fluid_types)
-        htevolver_client.dilution(dilution_request)
+        influx_request = build_influx_request(use_liquid, station_list, fluid_types)
+        htevolver_client.influx(influx_request)
 
     htevolver_client.disconnect()

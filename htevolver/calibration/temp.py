@@ -131,9 +131,10 @@ def collect_temp_data(
         >>> client = HTEvolverClient("192.168.1.10", False)
         >>> calibration_data = collect_temp_data(client, [0, 1], 3)
     """
-    # initialize data structures
-    calibration_data: dict[str, CalibrationData] = {
-        f"station_{station_id}": CalibrationData(
+    calibration_data: dict[str, CalibrationData] = {}
+    for station_id in station_list:
+        station_key = f"station_{station_id}"
+        calibration_data[station_key] = CalibrationData(
             voltage=np.zeros(num_standards),
             standards=np.zeros(num_standards),
             standard_deviation=np.zeros(num_standards),
@@ -141,8 +142,6 @@ def collect_temp_data(
             complete=False,
             settings={"station_list": station_list, "num_standards": num_standards},
         )
-        for station_id in station_list
-    }
 
     # Prepare for room temperature measurements
     for station_id in station_list:
@@ -179,24 +178,25 @@ def collect_temp_data(
     for station_id in station_list:
         station_key = f"station_{station_id}"
 
-        # Calculate step size for temperature values above room temperature
         room_temp_voltage = calibration_data[station_key].voltage[room_temp_step_num]
         num_additional_setpoints = num_standards - 3
-        # Create list for setpoints above room temperature
         calibration_data[station_key].settings["setpoints"] = []
         calibration_data[station_key].settings["setpoints"].append(MIN_TEMP)
 
-        below_rt_step = (MIN_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
-        above_rt_step = (MAX_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
-        for i in range(int(num_additional_setpoints / 2)):
-            calibration_data[station_key].settings["setpoints"].append(MIN_TEMP - (i * below_rt_step))
+        if num_additional_setpoints:
+            below_rt_step = (MIN_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
+            for i in range(int(num_additional_setpoints / 2)):
+                calibration_data[station_key].settings["setpoints"].append(MIN_TEMP - (i * below_rt_step))
+
         calibration_data[station_key].settings["setpoints"].append(room_temp_voltage)
 
-        for i in range(int(num_additional_setpoints / 2)):
-            calibration_data[station_key].settings["setpoints"].append(MAX_TEMP + (i * above_rt_step))
+        if num_additional_setpoints:
+            above_rt_step = (MAX_TEMP - room_temp_voltage) / (num_additional_setpoints / 2)
+            for i in range(int(num_additional_setpoints / 2)):
+                calibration_data[station_key].settings["setpoints"].append(MAX_TEMP + (i * above_rt_step))
+
         calibration_data[station_key].settings["setpoints"].append(MAX_TEMP)
 
-        # Combine both lists and convert to integers
         logger.info(f"Setpoints for SmartStation {station_id}: {calibration_data[station_key].settings['setpoints']} ")
 
     # Loop through all temperature setpoints
@@ -257,7 +257,7 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
         graph (bool, optional): Whether to create visualization graphs. Defaults to True.
 
     Returns:
-        dict[int, CalibrationData]: Updated calibration data with fitted coefficients.
+        dict[str, CalibrationData]: Updated calibration data with fitted coefficients.
 
     Examples:
         >>> calibration_data = collect_temp_data(client, [0, 1], 3)
@@ -265,16 +265,16 @@ def fit_data(calibration_data: dict[str, CalibrationData], graph: bool = True) -
     """
     print()
     logger.info("Generating linear fit for collected Temperature data...")
-    for station_id in calibration_data:
+    for station_key in calibration_data:
         coefficients, cov = curve_fit(
-            CalibrationData.linear, calibration_data[station_id].standards, calibration_data[station_id].voltage
+            CalibrationData.linear, calibration_data[station_key].standards, calibration_data[station_key].voltage
         )
-        calibration_data[station_id].coefficients = coefficients
+        calibration_data[station_key].coefficients = coefficients
+
     if graph:
-        max_values = np.array([np.max(calibration_data[station_id].voltage) for station_id in calibration_data])
+        max_values = np.array([np.max(calibration_data[station_key].voltage) for station_key in calibration_data])
         max_value = np.max(max_values)
         grapher = GraphCalibration(
-            container_type="Smart Station",
             title="Temperature",
             units="Celsius",
             row=2,
@@ -308,11 +308,11 @@ if __name__ == "__main__":
     collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
     final_calibration_data = fit_data(collected_calibration_data, True)
 
-    for station_id in final_calibration_data:
+    for station_key in final_calibration_data:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        serialized_calibration_data = CalibrationData.to_json({station_id: final_calibration_data[station_id]})
+        serialized_calibration_data = CalibrationData.to_json({station_key: final_calibration_data[station_key]})
         htevolver_client.evolver.send_calibration(
-            serialized_calibration_data, metadata={"parameter": "temp", "timestamp": timestamp, "station_id": station_id}
+            serialized_calibration_data, metadata={"parameter": "temp", "timestamp": timestamp, "station_key": station_key}
         )
 
     htevolver_client.disconnect()

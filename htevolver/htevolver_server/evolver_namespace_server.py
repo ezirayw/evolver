@@ -139,8 +139,8 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
     and processes client requests for control and data acquisition.
 
     Attributes:
-        evolver_conf (dict): Configuration for eVOLVER.
-        evolver_conf_path (str): Path to the eVOLVER configuration file.
+        evolver_config (dict): Configuration for eVOLVER.
+        evolver_config_path (str): Path to the eVOLVER configuration file.
         phase (int): Current broadcast phase (0, 1, or 2).
         command_queue (list[SerialCommand]): Queue of commands to be sent to the Arduino.
         running_immediate (bool): Whether an immediate command is being processed.
@@ -151,26 +151,26 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
 
     def __init__(
         self,
-        evolver_conf: dict,
-        evolver_conf_path: str,
+        evolver_config: dict,
+        evolver_config_path: str,
         namespace: str = "/evolver",
     ):
         super().__init__(namespace)
-        self.evolver_conf: dict = evolver_conf
-        self.evolver_conf_path: str = evolver_conf_path
+        self.evolver_config: dict = evolver_config
+        self.evolver_config_path: str = evolver_config_path
         self.phase: int = 0
         self.command_queue: list[SerialCommand] = []
         self.running_immediate: bool = False
         self.running_broadcast: bool = False
 
-        self.calibration_directory: str = evolver_conf["calibration_directory"]
-        self.calibration_cache_directory: str = evolver_conf["calibration_cache_directory"]
+        self.calibration_directory: str = evolver_config["calibration_directory"]
+        self.calibration_cache_directory: str = evolver_config["calibration_cache_directory"]
         self.serial_connection: serial.Serial = serial.Serial(
-            port=self.evolver_conf["serial_port"],
-            baudrate=self.evolver_conf["serial_baudrate"],
-            timeout=self.evolver_conf["serial_timeout"],
+            port=self.evolver_config["serial_port"],
+            baudrate=self.evolver_config["serial_baudrate"],
+            timeout=self.evolver_config["serial_timeout"],
         )
-        EvolverCommand.extract_parameter_info(self.evolver_conf["parameters"])
+        EvolverCommand.extract_parameter_info(self.evolver_config["parameters"])
 
         os.makedirs(self.calibration_directory, exist_ok=True)
         os.makedirs(self.calibration_cache_directory, exist_ok=True)
@@ -218,7 +218,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.send_command("temp", [30, 30, 30, 30], True, True)
             ```
         """
-        logger.info(f"Received the client command: {command}")
+        logger.info(f"Received command on eVOLVER namespace: {command}")
         try:
             evolver_command = EvolverCommand.create(command)
 
@@ -241,9 +241,11 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
                     self.running_immediate = False
 
             # Update the parameter information in active conf dictionary and conf file
-            self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["recurring"] = evolver_command.recurring
-            if self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] is not None:
-                self.evolver_conf["parameters"][evolver_command.phase][evolver_command.param]["value"] = evolver_command.value
+            self.evolver_config["parameters"][evolver_command.phase][evolver_command.param]["recurring"] = (
+                evolver_command.recurring
+            )
+            if self.evolver_config["parameters"][evolver_command.phase][evolver_command.param]["value"] is not None:
+                self.evolver_config["parameters"][evolver_command.phase][evolver_command.param]["value"] = evolver_command.value
             self.save_conf()
             logger.info(f"Finished processing COMMAND on eVOLVER namespace: {evolver_command}")
         except EvolverError:
@@ -261,7 +263,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_status()
             ```
         """
-        logger.info("Received request for the current eVOLVER namespace status.")
+        logger.info("Received eVOLVER namespace status request.")
         status = {
             "phase": self.phase,
             "command_queue": [asdict(command) for command in self.command_queue],
@@ -271,7 +273,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         await self.emit("get_status", status, to=sid)
         logger.info("Finished processing REQUEST_STATUS on eVOLVER namespace.")
 
-    async def on_request_configig(self, sid):
+    async def on_request_config(self, sid):
         """Respond with the current eVOLVER configuration.
 
         Args:
@@ -283,49 +285,47 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.request_config()
             ```
         """
-        logger.info("Received request for eVOLVER namespace configuration.")
-        await self.emit("get_conf", self.evolver_conf, to=sid)
-        logger.info("Finished processing REQUEST_CONFIG on eVOLVER namespace")
+        logger.info("Received eVOLVER namespace configuration request.")
+        return self.evolver_config
 
     async def on_request_calibration(self, sid, calibration_request_data: dict):
         """Send calibration data to the client.
 
-        Loads and sends the specified calibration file to the client.
+        If filename is given, loads and sends the specified calibration file to the client.
+        Otherwise, returns most recently generated calibration in the parameter directory.
 
         Args:
             sid (str): Session ID of the client.
             calibration_request_data (dict): Dictionary with information to request proper calibration data.
-                Example: {"parameter": "temp", "station_id": 0, "filename": "calibration_data_temp_2023-01-01.json"}
+                Example: {"parameter": "temp", "station_id": 0, "filename": "2023-01-01_calibration_data_temp_.json"}
 
         Examples:
             Called by client via:
             ```
-            client.evolver.request_calibration("temp", 0, "calibration_data_temp_2023-01-01.json")
+            client.evolver.request_calibration("temp", 0, "2023-01-01_calibration_data_temp_.json")
             ```
         """
         logger.info(
-            f"Received request for SmartStation: {calibration_request_data['station_id']} {calibration_request_data['parameter']} calibration data"
+            f"Received eVOLVER namespace calibration request for SmartStation: {calibration_request_data['station_id']} {calibration_request_data['parameter']}."
         )
         try:
-            local_filename = os.path.join(
-                self.calibration_directory, calibration_request_data["parameter"], calibration_request_data["filename"]
-            )
-            calibration_data = CalibrationData.from_file(local_filename)
-            await self.emit(
-                "get_calibration",
-                {"calibration_data": calibration_data, "station_id": calibration_request_data["station_id"]},
-                to=sid,
-            )
-            logger.info("Finished processing REQUEST_CALIBRATION on eVOLVER namespace.")
+            calibration_filename: str = ""
+            if calibration_request_data["filename"]:
+                calibration_filename = os.path.join(
+                    self.calibration_directory, calibration_request_data["parameter"], calibration_request_data["filename"]
+                )
+            else:
+                calibration_files = os.listdir(os.path.join(self.calibration_directory, calibration_request_data["parameter"]))
+                calibration_files.sort(reverse=True)
+                calibration_filename = os.path.join(
+                    self.calibration_directory, calibration_request_data["parameter"], calibration_files[0]
+                )
+            return CalibrationData.from_file(calibration_filename)
         except FileNotFoundError:
             logger.exception("Error processing REQUEST_CALIBRATION on eVOLVER namespace: ", stack_info=True)
-            await self.emit(
-                "get_calibration",
-                {"calibration_data": {}, "station_id": calibration_request_data["station_id"]},
-                to=sid,
-            )
+            return {}
 
-    async def on_get_calibration(self, sid, new_calibration_data: dict):
+    async def on_save_calibration(self, sid, new_calibration_data: dict):
         """Save calibration data received from a client.
 
         Stores new calibration data received from a client to the appropriate file.
@@ -341,16 +341,15 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             client.evolver.send_calibration(calibration_data, metadata)
             ```
         """
-        logger.info("Received new calibration data from client. Processing now...")
+        logger.info("Received new calibration data from client.")
         timestamp = new_calibration_data["metadata"]["timestamp"]
         parameter = new_calibration_data["metadata"]["parameter"]
-        station_id = new_calibration_data["metadata"]["station_id"]
+        station_key = new_calibration_data["metadata"]["station_key"]
 
         filename = os.path.join(
-            self.calibration_directory, f"station_{station_id}", parameter, f"calibration_data_{parameter}_{timestamp}.json"
+            self.calibration_directory, f"{station_key}", parameter, f"{timestamp}_calibration_data_{parameter}.json"
         )
         CalibrationData.to_file(filename, new_calibration_data["data"])
-        logger.info("Finished processing GET_CALIBRATION on eVOLVER namespace.")
 
     def load_conf(self):
         """Load the eVOLVER configuration from disk.
@@ -358,9 +357,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         Reads the current configuration from the file system to ensure operations
         use the most up-to-date settings.
         """
-        with open(self.evolver_conf_path, "r") as conf:
-            self.evolver_conf = yaml.safe_load(conf)
-        logger.debug(f"Following configuration loaded from memory: {self.evolver_conf}")
+        with open(self.evolver_config_path, "r") as conf:
+            self.evolver_config = yaml.safe_load(conf)
+        logger.debug(f"Following configuration loaded from memory: {self.evolver_config}")
 
     def save_conf(self):
         """Saves the internal HTeVOVLER configuration to memory.
@@ -370,11 +369,11 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         across restarts."""
 
         with open(
-            os.path.realpath(self.evolver_conf_path),
+            os.path.realpath(self.evolver_config_path),
             "w",
         ) as conf_file:
-            yaml.dump(self.evolver_conf, conf_file)
-        logger.debug(f"Following configuration saved to memory:{self.evolver_conf}")
+            yaml.dump(self.evolver_config, conf_file)
+        logger.debug(f"Following configuration saved to memory:{self.evolver_config}")
 
     async def run_commands(self):
         """Execute all commands in the command queue.
@@ -574,12 +573,10 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             packed_decoded_response = self.cobs_decode(response_bytes)
             logger.debug(f"Serial decoded response from arduino: {packed_decoded_response.hex(' ')}")
         except Exception:
-            logger.exception("Error decoding COBS response", stack_info=True)
             raise EvolverSerialError("Error decoding COBS response")
 
         if len(packed_decoded_response) < 3:  # At least address, length, and type
-            logger.error(f"Response too short: {packed_decoded_response.hex(' ')}")
-            raise EvolverSerialError("Response packet too short")
+            raise EvolverSerialError(f"Response packet too short: {packed_decoded_response.hex(' ')}")
 
         # Verify the checksum
         calculated_checksum = sum(packed_decoded_response)
@@ -587,10 +584,9 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
             calculated_checksum = (calculated_checksum & 0xFF) + (calculated_checksum >> 8)
 
         if calculated_checksum != 0xFF:
-            logger.exception(
-                f"Checksum verification failed: calculated=0x{calculated_checksum:02x}, expected=0x{0xFF:02x}", stack_info=True
+            raise EvolverSerialError(
+                f"Checksum verification failed: calculated=0x{calculated_checksum:02x}, expected=0x{0xFF:02x}"
             )
-            raise EvolverSerialError("Checksum verification failed for response packet")
 
         # ACKNOWLEDGE - send acknowledgment to arduino
         # Update SerialCommand dataclass attributes
@@ -660,17 +656,17 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         await self.run_commands()
         logger.debug("Finished sending commands updating phase states on Arduinos")
 
-        if not self.evolver_conf["parameters"][f"phase_{phase}"]:
+        if not self.evolver_config["parameters"][f"phase_{phase}"]:
             logger.debug("Empty phase detected")
             self.running_broadcast = False
             return True
 
         # after running IMMEDIATE commands, add recurring commands to the command_queue based on the phase of the control loop eVOLVER is in
-        for param, config in self.evolver_conf["parameters"][f"phase_{phase}"].items():
+        for param, config in self.evolver_config["parameters"][f"phase_{phase}"].items():
             if config["recurring"]:
                 new_command = SerialCommand(
                     param=param,
-                    address=self.evolver_conf["parameters"][f"phase_{phase}"][param]["address"],
+                    address=self.evolver_config["parameters"][f"phase_{phase}"][param]["address"],
                     value=config["value"],
                     tag=CommandTags.REQUEST,
                 )
@@ -681,7 +677,7 @@ class EvolverServerNamespace(socketio.AsyncNamespace):
         broadcast_data = BroadcastData(
             phase=self.phase,
             data=data,
-            config=self.evolver_conf["parameters"][f"phase_{phase}"],
+            config=self.evolver_config["parameters"][f"phase_{phase}"],
             timestamp=time.time(),
         )
         logger.info(f"eVOLVER Broadcast: {broadcast_data}")

@@ -13,14 +13,13 @@ if __name__ == "__main__":
 
     data_filepath = options.calibration_file
     calibration_data = CalibrationData.from_file(data_filepath)
-    calibration_type = ""
 
     logger.info(f"Loaded calibration data: {calibration_data}")
 
     max_values = []
-    for key, value in calibration_data.items():
-        station = int(key)
+    calibration_type = ""
 
+    for key, value in calibration_data.items():
         if isinstance(value, dict):
             calibration_type = "od"
             for vial_key, vial_data in value.items():
@@ -37,7 +36,6 @@ if __name__ == "__main__":
     # graph the calibration curves
     if calibration_type == "temp":
         grapher = GraphCalibration(
-            container_type="SmartStation",
             title="Temperature",
             units="Celsius",
             row=2,
@@ -49,10 +47,9 @@ if __name__ == "__main__":
         grapher.graph(CalibrationData.linear, calibration_data)
 
     if calibration_type == "od":
-        for station_id, station_calibration_data in calibration_data.items():
+        for station_key, station_calibration_data in calibration_data.items():
             grapher = GraphCalibration(
-                container_type="Vial",
-                title=f"SmartStation {station_id}",
+                title="od",
                 units="OD600",
                 row=3,
                 column=6,

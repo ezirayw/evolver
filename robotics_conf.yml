@@ -6,7 +6,7 @@ states:
   - exit
   - busy
 routines:
-  - dilution
+  - influx
   - pipetting
   - filling_vials
   - priming_influx
@@ -37,17 +37,31 @@ wash_settings:
   dry_time: 10 # seconds
 
 xArm:
+  enabled: False
   ip: "192.168.1.200"
   roll: 180
   pitch: 0
   yaw: 0
   speed: 100
   mvacc: 100
+  home_position:
+    x: 207
+    y: 0
+    z: 112
+  intermediate_position:
+    x: 207
+    y: 0
+    z: 500
+  standby_position:
+    x: 40
+    y: -355
+    z: 500
 
 pipette_head:
-  serial_port: ""
+  enabled: False
   pumps:
     0:
+      serial_port: ""
       fluid: media
       type: dummy
       head_port: 1
@@ -59,8 +73,10 @@ pipette_head:
           primed: False
           volume: 0
     1:
+      serial_port: ""
       fluid: media
       type: dummy
+      head_port: 1
       ports:
         2:
           primed: False
@@ -69,8 +85,10 @@ pipette_head:
           primed: False
           volume: 0
     2:
+      serial_port: ""
       fluid: media
       type: dummy
+      head_port: 1
       ports:
         2:
           primed: False
@@ -79,8 +97,10 @@ pipette_head:
           primed: False
           volume: 0
     3:
+      serial_port: ""
       fluid: media
       type: dummy
+      head_port: 1
       ports:
         2:
           primed: False

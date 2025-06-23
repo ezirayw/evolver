@@ -8,7 +8,7 @@ import socketio
 import yaml
 from tecancavro.syringe import SyringeError, SyringeTimeout
 
-from htevolver.exceptions import PipetteHeadError, RoboticsError, StopRobotics, xArmError
+from htevolver.exceptions import PipetteHeadError, RoboticsRoutineError, RoboticsServerError, StopRobotics, xArmError
 from htevolver.robotics.pipette_head import FluidTypes, PipetteHead
 from htevolver.robotics.smart_station import SmartStationRobotics, VialCoordinate
 from htevolver.robotics.xarm import xArm, xArmCoordinate
@@ -36,12 +36,9 @@ class ServerResult:
         elapsed_time (float): Time taken to execute the operation in seconds.
         message (str): Descriptive message about the operation result.
         code(int): Error code for the operation, useful for error handling and programmatic responses.
-            0 -> Request handled successfully
-            1 -> StopRobotics error encountered due to incompatible state
-            2 -> RoboticsError error encountered due to robotics module error
+            View ServerResultCodes for detailed information on codes/messages
     """
 
-    done: bool
     namespace: str
     event: str
     status: dict
@@ -50,7 +47,7 @@ class ServerResult:
     code: int
 
 
-def routine_decorator(routine_type: RoboticsRoutines):
+def robotics_routine(routine_type: RoboticsRoutines):
     """Decorator for robotics routines that manages server status and routine results.
 
     Handles updating the robotics configuration and manages the server status state,
@@ -65,7 +62,7 @@ def routine_decorator(routine_type: RoboticsRoutines):
 
     Examples:
         ```
-        @routine_decorator(RoboticsRoutines.PIPETTE)
+        @robotics_routine(RoboticsRoutines.PIPETTE)
         async def on_pipette_routine(self, sid, pipette_commands):
             # Function implementation
             return (True, "executed successfully")
@@ -85,7 +82,7 @@ def routine_decorator(routine_type: RoboticsRoutines):
                     self.routine = routine_type
 
                     logger.info(f"Running the routine: {routine_type.name}")
-                    result = await func(self, *args, **kwargs)
+                    await func(self, *args, **kwargs)
 
                     logger.info(f"Done running the routine: {routine_type.name}")
                     end_time = time.time()
@@ -93,13 +90,12 @@ def routine_decorator(routine_type: RoboticsRoutines):
                     self.state = RoboticsState.READY
                     return asdict(
                         ServerResult(
-                            done=result,
                             namespace="/robotics",
                             event=func.__name__,
                             status=self.to_dict(),
                             elapsed_time=end_time - start_time,
-                            message=ServerResultCodes.SUCCESS.name if result else ServerResultCodes.ROUTINE_ERROR.name,
-                            code=ServerResultCodes.SUCCESS.value if result else ServerResultCodes.ROUTINE_ERROR.value,
+                            message=ServerResultCodes.SUCCESS.name,
+                            code=ServerResultCodes.SUCCESS.value,
                         )
                     )
 
@@ -110,7 +106,6 @@ def routine_decorator(routine_type: RoboticsRoutines):
                     logger.info(f"Stop state detected while running {routine_type.name}, exiting")
                     return asdict(
                         ServerResult(
-                            done=False,
                             namespace="/robotics",
                             event=func.__name__,
                             status=self.to_dict(),
@@ -119,12 +114,35 @@ def routine_decorator(routine_type: RoboticsRoutines):
                             code=ServerResultCodes.EXIT_ROUTINE.value,
                         )
                     )
-                except RoboticsError:
+                except PipetteHeadError:
                     end_time = time.time()
                     self.state = RoboticsState.EMERGENCY_STOP
-                    logger.exception(f"Robotics module error encountered trying to run {routine_type.name}", stack_info=True)
+                    logger.exception(f"PipetteHead error encountered trying to run {routine_type.name}", stack_info=True)
                     return ServerResult(
-                        done=False,
+                        namespace="/robotics",
+                        event=func.__name__,
+                        status=self.to_dict(),
+                        elapsed_time=end_time - start_time,
+                        message=ServerResultCodes.ROBOTICS_ERROR.name,
+                        code=ServerResultCodes.ROBOTICS_ERROR.value,
+                    )
+
+                except xArmError:
+                    end_time = time.time()
+                    self.state = RoboticsState.EMERGENCY_STOP
+                    logger.exception(f"xArm error encountered trying to run {routine_type.name}", stack_info=True)
+                    return ServerResult(
+                        namespace="/robotics",
+                        event=func.__name__,
+                        status=self.to_dict(),
+                        elapsed_time=end_time - start_time,
+                        message=ServerResultCodes.ROBOTICS_ERROR.name,
+                        code=ServerResultCodes.ROBOTICS_ERROR.value,
+                    )
+
+                except RoboticsRoutineError:
+                    end_time = time.time()
+                    return ServerResult(
                         namespace="/robotics",
                         event=func.__name__,
                         status=self.to_dict(),
@@ -135,7 +153,6 @@ def routine_decorator(routine_type: RoboticsRoutines):
             else:
                 logger.warning(f"Tried running the {routine_type.name} routine but not in ready state.")
                 return ServerResult(
-                    done=False,
                     namespace="/robotics",
                     event=func.__name__,
                     status=self.to_dict(),
@@ -186,7 +203,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
     Manages the robotics hardware components including the xArm robot and PipetteHead.
     Handles client requests for robotics operations, configuration, and status updates.
-    Coordinates complex robotics routines such as pipetting, dilutions, and vial filling.
+    Coordinates complex robotics routines such as pipetting, influx, and vial filling.
 
     Attributes:
         robotics_config (dict): Configuration for robotics components.
@@ -212,25 +229,37 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         self.robotics_config_path: str = robotics_config_path
         self.arm_command_queue: deque[xArmCoordinate] = deque()
 
-        self.state = RoboticsState.READY
-        self.routine = RoboticsRoutines.NO_ROUTINE
-        self.active_stations = -1
+        self.state: RoboticsState = RoboticsState.READY
+        self.routine: RoboticsRoutines = RoboticsRoutines.NO_ROUTINE
+        self.active_stations: int = -1
         self.active_vials: list[int | None] = []
 
         # instantiate robotics modules
-        self.pipette_head: PipetteHead = PipetteHead.create(self.robotics_config["pipette_head"])
-        logger.info(f"PipetteHead successfully created: {self.pipette_head.to_dict()}")
+        try:
+            self.pipette_head: PipetteHead = PipetteHead.create(self.robotics_config["pipette_head"])
+            logger.info(f"PipetteHead successfully created: {self.pipette_head.to_dict()}")
+        except PipetteHeadError as e:
+            logger.exception("Error trying to create PipetteHead instance, aborting server initialization...", stack_info=True)
+            raise RoboticsServerError("Error trying to create PipetteHead instance, aborting server initialization...") from e
+
         self.stations: dict[int, SmartStationRobotics] = {}
         for station_id, station_config in self.robotics_config["smart_stations"].items():
             if station_config["connect"]:
                 self.stations[station_id] = SmartStationRobotics.create(station_config)
         logger.info(f"SmartStations successfully created: {[station for station in self.stations.values()]}")
-        self.arm = xArm.create(self.robotics_config["xArm"])
-        self.arm.register_callback(self.error_warn_change_callback, self.state_changed_callback, self.connect_changed_callback)
-        self.arm.setup()
-        logger.info(f"xArm successfully crated: {self.arm}")
 
-        logger.info("Robotics namespace initialized")
+        try:
+            self.arm = xArm.create(self.robotics_config["xArm"])
+            self.arm.register_callback(
+                self.error_warn_change_callback, self.state_changed_callback, self.connect_changed_callback
+            )
+            self.arm.setup()
+            logger.info(f"xArm successfully crated: {self.arm}")
+        except xArmError as e:
+            logger.exception("Error trying to create xArm instance, aborting server initialization...", stack_info=True)
+            raise RoboticsServerError("Error trying to create xArm instance, aborting server initialization...") from e
+
+    logger.info("Robotics namespace initialized")
 
     async def on_connect(self, sid, environ) -> None:
         """Handle client connection to the robotics namespace.
@@ -266,7 +295,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         logger.info("Received request for the current robotics namespace status.")
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_request_status",
                 status=self.to_dict(),
@@ -287,10 +315,9 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received configuration request for the robotics namespace.")
+        logger.info("Received robotics namespace configuration request.")
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_request_status",
                 status=self.robotics_config,
@@ -327,24 +354,33 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             dict: Dictionary representation of ServerResult object
 
         """
-        logger.info(f"Received override request on the robotics namespace: {override_data}")
+        logger.info(f"Received robotics namespace override request: {override_data}")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
         if "state" in override_data or "routine" in override_data:
             override_key = None
             if "state" in override_data:
-                override_key = "state"
-            elif "routine" in override_data:
-                override_key = "routine"
+                try:
+                    RoboticsState(override_data[override_key])
+                except ValueError:
+                    logger.exception(
+                        "Aborting on_override, invalid state entered. Must be a valid member of RoboticsState Enum",
+                        stack_info=True,
+                    )
+                    message = "Invalid state entered. Must be a valid member of RoboticsState Enum"
+                    code = ServerResultCodes.REQUEST_ERROR
 
-            # Process the state or routine override if present
-            if override_key is not None:
-                for key, value in override_data[override_key].items():
-                    if hasattr(self, key):
-                        attribute_value = getattr(self, key)
-                        attr_type = type(attribute_value)
-                        if isinstance(value, attr_type):
-                            setattr(self, key, value)
-                        else:
-                            logger.warning(f"Type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}")
+            elif "routine" in override_data:
+                try:
+                    RoboticsRoutines(override_data[override_key])
+                except ValueError:
+                    logger.exception(
+                        "Aborting on_override, invalid routine entered. Must be a valid member of RoboticsRoutines Enum",
+                        stack_info=True,
+                    )
+                    message = "Invalid routine entered. Must be a valid member of RoboticsRoutines Enum"
+                    code = ServerResultCodes.REQUEST_ERROR
 
         elif "config" in override_data:
             for key, value in override_data["config"].items():
@@ -354,18 +390,23 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                     if isinstance(value, attr_type):
                         self.robotics_config[key] = value
                     else:
-                        logger.warning(f"Type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}")
+                        logger.exception(
+                            f"Aborting on_override, type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}",
+                            stack_info=True,
+                        )
+                        message = f"Type mismatch for {key}: expected {attr_type.__name__}, got {type(value).__name__}"
+                        code = ServerResultCodes.REQUEST_ERROR
+
             self.update_robotics()
 
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_override",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
@@ -381,17 +422,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to pause an active routine.")
-        self.pause_robotics()
+        logger.info("Received robotics namespace pause request.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        try:
+            self.pause_robotics()
+        except PipetteHeadError:
+            logger.exception("Aborting on_pause, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_pause",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
@@ -407,17 +456,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to resume an active routines.")
-        self.resume_robotics()
+        logger.info("Received robotics namespace resume request.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        try:
+            self.resume_robotics()
+        except PipetteHeadError:
+            logger.exception("Aborting on_resume, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_resume",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
@@ -433,17 +490,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to stop an active routine.")
-        self.stop_robotics()
+        logger.info("Received robotics namespace stop request.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        try:
+            self.stop_robotics()
+        except PipetteHeadError:
+            logger.exception("Aborting on_stop, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_stop",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
@@ -458,69 +523,107 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to connect to the xArm.")
-        self.arm.connect()
+        logger.info("Received robotics namespace request to connect to the xArm.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        try:
+            self.arm.connect()
+            self.arm.setup()
+        except PipetteHeadError:
+            logger.exception("Aborting on_connect_xArm, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_connect_xArm",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
     async def on_reset_xArm(self, sid) -> dict:
         """Reset the xArm to clear errors.
 
-        Reconnects if disconnected and resets the arm to clear error states.
-
         Args:
             sid (str): Session ID of the client.
 
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to reset xArm.")
-        self.arm.reset()
+        logger.info("Received robotics namespace request to reset the xArm.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        try:
+            self.arm.setup()
+        except PipetteHeadError:
+            logger.exception("Aborting on_reset_xArm, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_reset_xArm",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
-    async def on_enable_pumps(self, sid, pump_list: list[int] = [0, 1, 2, 3]) -> dict:
+    async def on_enable_pumps(self, sid, pump_list: list[int]) -> dict:
         """Enable PipetteHead syringe pumps.
 
         Enables specified syringe pumps to execute commands.
 
         Args:
             sid (str): Session ID of the client.
-            pump_list (list[int], optional): List of pump IDs to connect.
-                Defaults to [0, 1, 2, 3].
+            pump_list (list[int], optional): List of PipetteHead Pump IDs to connect.
 
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to enable PipetteHead syringe pumps.")
-        self.pipette_head.enable(pump_list)
+        logger.info("Received robotics namespace request to enable PipetteHead syringe pumps.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        for pump_id in pump_list:
+            if pump_id > 3 or pump_id < 0:
+                logger.error("Aborting on_enable_pumps, invalid PipetteHead Pump ID detected")
+                code = ServerResultCodes.REQUEST_ERROR
+                message = f"Invalid PipetteHead Pump ID detected: {pump_id}"
+                return asdict(
+                    ServerResult(
+                        namespace="/robotics",
+                        event="on_enable_pumps",
+                        status=self.to_dict(),
+                        elapsed_time=0.00,
+                        message=message,
+                        code=code.value,
+                    )
+                )
+
+        try:
+            self.pipette_head.enable(pump_list)
+        except PipetteHeadError:
+            logger.exception("Aborting on_enable_pumps, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_enable_pumps",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
@@ -531,40 +634,124 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         Args:
             sid (str): Session ID of the client.
-            pump_list (list[int], optional): List of pump IDs to disable.
+            pump_list (list[int], optional): List of PipetteHead Pump IDs to disable.
                 Defaults to an empty list.
 
         Returns:
             dict: Dictionary representation of ServerResult object
         """
-        logger.info("Received request to disable PipetteHead syringe pumps.")
-        for pump_id in pump_list:
+        logger.info("Received robotics namespace request to disable PipetteHead syringe pumps.")
+        code: ServerResultCodes = ServerResultCodes.SUCCESS
+        message: str = ServerResultCodes.SUCCESS.name
+
+        if pump_list:
+            for pump_id in pump_list:
+                if pump_id > 3 or pump_id < 0:
+                    logger.error("Aborting on_disable_pumps, invalid PipetteHead Pump ID detected")
+                    code = ServerResultCodes.REQUEST_ERROR
+                    message = f"Invalid PipetteHead Pump ID detected: {pump_id}"
+                    return asdict(
+                        ServerResult(
+                            namespace="/robotics",
+                            event="on_enable_pumps",
+                            status=self.to_dict(),
+                            elapsed_time=0.00,
+                            message=message,
+                            code=code.value,
+                        )
+                    )
+
+        try:
             self.pipette_head.disable(pump_list)
+        except PipetteHeadError:
+            logger.exception("Aborting on_disable_pumps, PipetteHeadError detected", stack_info=True)
+            message = "PipetteHeadError detected"
+            code = ServerResultCodes.ROBOTICS_ERROR
+
         return asdict(
             ServerResult(
-                done=True,
                 namespace="/robotics",
                 event="on_disable_pumps",
                 status=self.to_dict(),
                 elapsed_time=0.00,
-                message=ServerResultCodes.SUCCESS.name,
-                code=ServerResultCodes.SUCCESS.value,
+                message=message,
+                code=code.value,
             )
         )
 
-    @routine_decorator(RoboticsRoutines.PRIMING_INFLUX)
-    async def on_prime_pumps(self, sid, pump_list: list[int] = []) -> bool:
+    @robotics_routine(RoboticsRoutines.HOME)
+    async def on_home(self):
+        """Execute the xArm homing protocol
+
+        Checks to see if xArm is in its standby position to ensure that xArm moves in expected
+        standby -> home path.
+
+        Raises:
+            xArmError: If xArm current position not within 5% of configured standby coordinates
+        """
+
+        code, current_coordinates = self.arm.arm_api.get_position()
+        if (current_coordinates[0] < self.arm.standby_position.x * 0.95) or (
+            current_coordinates[0] > self.arm.standby_position.x * 1.05
+        ):
+            logger.error("Aborting xArm standby, current x-coordinate position not at home.")
+            raise xArmError("Aborting xArm standby, current x-coordinate position not at home.")
+
+        if (current_coordinates[1] < self.arm.standby_position.y * 0.95) or (
+            current_coordinates[1] > self.arm.standby_position.y * 1.05
+        ):
+            logger.error("Aborting xArm standby, current y-coordinate position not at home.")
+            raise xArmError("Aborting xArm standby, current y-coordinate position not at home.")
+
+        if (current_coordinates[2] < self.arm.standby_position.z * 0.95) or (
+            current_coordinates[2] > self.arm.standby_position.z * 1.05
+        ):
+            logger.error("Aborting xArm standby, current z-coordinate position not at home.")
+            raise xArmError("Aborting xArm standby, current z-coordinate position not at home.")
+
+        await self.to_home()
+
+    @robotics_routine(RoboticsRoutines.STANDBY)
+    async def on_standby(self):
+        """Execute the xArm standby protocol
+
+        Checks to see if xArm is in its home position to ensure that xArm moves in expected
+        home -> standby path.
+
+        Raises:
+            xArmError: If xArm current position not within 5% of configured home coordinates
+        """
+        code, current_coordinates = self.arm.arm_api.get_position()
+        if (current_coordinates[0] < self.arm.home_position.x * 0.95) or (
+            current_coordinates[0] > self.arm.home_position.x * 1.05
+        ):
+            logger.error("Aborting xArm homing, current x-coordinate position not in standby.")
+            raise xArmError("Aborting xArm homing, current x-coordinate position not in standby.")
+
+        if (current_coordinates[1] < self.arm.home_position.y * 0.95) or (
+            current_coordinates[1] > self.arm.home_position.y * 1.05
+        ):
+            logger.error("Aborting xArm homing, current y-coordinate position not in standby.")
+            raise xArmError("Aborting xArm homing, current y-coordinate position not in standby.")
+
+        if (current_coordinates[2] < self.arm.home_position.z * 0.95) or (
+            current_coordinates[2] > self.arm.home_position.z * 1.05
+        ):
+            logger.error("Aborting xArm homing, current z-coordinate position not in standby.")
+            raise xArmError("Aborting xArm homing, current z-coordinate position not in standby.")
+
+        await self.to_standby()
+
+    @robotics_routine(RoboticsRoutines.PRIMING_INFLUX)
+    async def on_prime_pipettehead(self, sid, pump_list: list[int] = []):
         """Prime the specified syringe pumps.
 
         Prepares the syringe pumps for use by filling the input tubing with fluid.
 
         Args:
             sid (str): Session ID of the client.
-            pump_list (list[int], optional): List of pump IDs to prime.
+            pump_list (list[int], optional): List of PipetteHead Pump IDs to prime.
                 Defaults to an empty list.
-
-        Returns:
-            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -572,22 +759,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             client.prime_syringe_pumps([0, 1])
             ```
         """
-        await self.pipette_head.prime(pump_list)
-        return True
+        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        for pump_id in pump_list:
+            if pump_id not in valid_pump_ids:
+                logger.error(f"Aborting on_prime_pipettehead routine, invalid pump_id detected: {pump_id}")
+                raise RoboticsRoutineError(f"Aborting on_prime_pipettehead routine, invalid pump_id detected: {pump_id}")
 
-    @routine_decorator(RoboticsRoutines.PUMP_INITIALIZE)
-    async def on_initialize_pumps(self, sid, pump_list: list[int] = []) -> bool:
+        await self.pipette_head.prime(pump_list)
+
+    @robotics_routine(RoboticsRoutines.PUMP_INITIALIZE)
+    async def on_initialize_pipettehead(self, sid, pump_list: list[int] = []):
         """Initialize the syringe pumps.
 
         Initializes the XCaliburD/Tecan syringe pumps for operation.
 
         Args:
             sid (str): Session ID of the client.
-            pump_list (list[int], optional): List of pump IDs to initialize.
+            pump_list (list[int], optional): List of PipetteHead Pump IDs to initialize.
                 Defaults to an empty list.
-
-        Returns:
-            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -595,23 +784,25 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             client.initialize_pumps([0, 1])
             ```
         """
+        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        for pump_id in pump_list:
+            if pump_id not in valid_pump_ids:
+                logger.error(f"Aborting on_initialize_pipettehead routine, invalid pump_id detected: {pump_id}")
+                raise RoboticsRoutineError(f"Aborting on_initialize_pipettehead routine, invalid pump_id detected: {pump_id}")
 
         await self.pipette_head.prime(pump_list)
-        return True
 
-    @routine_decorator(RoboticsRoutines.PIPETTE)
-    async def on_pipette_routine(self, sid, pipette_commands: list[int]) -> bool:
+    @robotics_routine(RoboticsRoutines.PIPETTE)
+    async def on_pipette_routine(self, sid, pipette_commands: dict[int, int]):
         """Execute a pipetting operation.
 
         Runs the PipetteHead to transfer fluids with the specified volumes.
 
         Args:
             sid (str): Session ID of the client.
-            pipette_commands (list[int]): List of volumes for each pump.
+            pipette_commands (dict[int,int]): Maps pipette volume values to PipetteHead Pump ID keys. Must be
+                less than the syringe pump's configured max volume.
                 Example: [100, 0, 50, 0] for 100μL from pump 0 and 50μL from pump 2.
-
-        Returns:
-            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -620,15 +811,21 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             ```
         """
 
-        for pipette_volume in pipette_commands:
-            if pipette_volume <= 0:
-                return False
+        for pipette_volume in pipette_commands.values():
+            if pipette_volume < 0:
+                logger.error(f"Aborting on_pipette routine, negative volume detected: {pipette_volume}")
+                raise RoboticsRoutineError(f"Aborting on_pipette routine, negative volume detected: {pipette_volume}")
+
+        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        for pump_id in pipette_commands:
+            if pump_id not in valid_pump_ids:
+                logger.error(f"Aborting pipette routine, invalid pump_id detected: {pump_id}")
+                raise RoboticsRoutineError(f"Aborting pipette routine, invalid pump_id detected: {pump_id}")
 
         await self.pipette_event(pipette_commands)
-        return True
 
-    @routine_decorator(RoboticsRoutines.FILLING_VIALS_PUMPS)
-    async def on_fill_vials_routine(self, sid, fill_commands: dict[int, tuple[str, int]]) -> bool:
+    @robotics_routine(RoboticsRoutines.FILLING_VIALS_PUMPS)
+    async def on_fill_vials_routine(self, sid, fill_commands: dict[int, tuple[str, int]]):
         """Fill vials with specified fluids.
 
         Fills vials in specified SmartStations with the given fluid types and volumes.
@@ -638,9 +835,6 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             fill_commands (dict[int, tuple[str, int]]): Dictionary mapping station IDs
                 to tuples of (fluid_type, volume_μL).
                 Example: {0: ("MEDIA", 1000), 1: ("DRUG", 500)}
-
-        Returns:
-            bool: Indicates wheter or not the routine was completed successfully.
 
         Examples:
             Called by the client via:
@@ -652,10 +846,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         for station_id, fill_command in fill_commands.items():
             if fill_command[0] not in FluidTypes.__members__:
                 logger.error(f"Invalid fluid type entered: {fill_command[0]}")
-                return False
+                raise RoboticsRoutineError(f"Invalid fluid type entered: {fill_command[0]}")
             if fill_command[1] > 7000:
                 logger.error(f"Invalid volume entered: {fill_command[1]}")
-                return False
+                raise RoboticsRoutineError(f"Invalid volume entered: {fill_command[1]}")
 
         station_pump_commands = {}
         for station_id, fill_command in fill_commands.items():
@@ -680,27 +874,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 vial_17={fill_command[0]: fill_command[1]},
             )
         await self.influx_snake_helper(station_pump_commands)
-        return True
 
-    @routine_decorator(RoboticsRoutines.DILUTION)
-    async def on_dilution_routine(self, sid, dilution_commands: dict[int, dict[int, dict[str, int]]]) -> bool:
-        """Execute dilutions across SmartStations.
+    @robotics_routine(RoboticsRoutines.INFLUX)
+    async def on_influx_routine(self, sid, influx_commands: dict[int, dict[int, dict[str, int]]]):
+        """Execute influx in specific vials across SmartStations.
 
-        Performs dilution operations by adding specified fluids and volumes
-        to specific vials across different stations.
+        Sends a influx command to the robotics system to pipette target fluids
+        into specified SmartStation vials.
 
         Args:
             sid (str): Session ID of the client.
-            dilution_commands (dict[int, dict[int, dict[str, int]]]): Nested dictionary mapping:
+            influx_commands (dict[int, dict[int, dict[str, int]]]): Nested dictionary mapping:
                 - station_id -> vial_id -> fluid_type -> volume
                 Example: {0: {3: {"MEDIA": 100, "DRUG": 50}}}
 
-        Returns:
-            bool: Indicates wheter or not the routine was completed successfully.
         Examples:
             Called by the client via:
             ```
-            client.dilutions({
+            client.influxs({
                 0: {
                     3: {"MEDIA": 100, "DRUG": 50},
                     4: {"MEDIA": 150}
@@ -708,24 +899,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             })
             ```
         """
-
-        influx_commands: dict[int, StationPumpCommands] = {}
-        for station_id, dilution_command in dilution_commands.items():
-            influx_commands[station_id] = StationPumpCommands()
-            for vial_id, pump_commands in dilution_command.items():
+        verified_commands: dict[int, StationPumpCommands] = {}
+        for station_id, influx_command in influx_commands.items():
+            verified_commands[station_id] = StationPumpCommands()
+            for vial_id, pump_commands in influx_command.items():
                 for fluid_type, volume in pump_commands.items():
                     if fluid_type not in FluidTypes.__members__:
                         logger.error(f"Invalid fluid type entered: {fluid_type}")
-                        return False
+                        raise RoboticsRoutineError(f"Invalid fluid type entered: {fluid_type}")
 
                     if volume < 0:
                         logger.error(
                             f"Negative volume detected for vial_{vial_id} in SmartStation_{station_id}: {(fluid_type, volume)}"
                         )
-                        return False
+                        raise RoboticsRoutineError(
+                            f"Negative volume detected for vial_{vial_id} in SmartStation_{station_id}: {(fluid_type, volume)}",
+                        )
                 influx_commands[station_id].__setattr__(f"vial_{vial_id}", pump_commands)
-        await self.influx_snake_helper(influx_commands)
-        return True
+        await self.influx_snake_helper(verified_commands)
 
     async def influx_snake_helper(self, station_pump_commands: dict[int, StationPumpCommands]) -> None:
         """Execute sequential pipetting in a snake-like pattern.
@@ -738,7 +929,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 station IDs to pump commands for each vial.
 
         Raises:
-            RoboticsError: If a robotics module error occurs during pipetting operations.
+            PipetteHeadError: re-raise from lower level hardware functions
+            xArmError: re-raise from lower level hardware functions
         """
 
         coordinate = VialCoordinate(x=-18, y=36)
@@ -775,11 +967,10 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         self.arm_command_queue.append(station.xArmPlane_in.vial_to_xarm(station.wash_location))
 
                     try:
-                        await self.pipette_event([0, 0, 0, 0])
-                    except RoboticsError:
-                        logger.exception("Error running wash step of influx_snake_helper:", stack_info=True)
-                        raise RoboticsError("Error running wash step of influx_snake_helper")
-
+                        await self.pipette_event({0: 0, 1: 0, 2: 0, 3: 0})
+                    except (PipetteHeadError, xArmError):
+                        logger.exception("Error running wash step of influx_snake_helper", stack_info=True)
+                        raise
                     ################# INFLUX STEP #################
                     # if at end of row, next vial_window will be the next row at same x location
                     if change_row:
@@ -796,8 +987,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         self.arm_command_queue.append(station.xArmPlane_in.vial_to_xarm(coordinate))
 
                     # get pump volume commands for current vial window
-                    pipette_volumes: list[int] = [0] * 4
-                    for index, vial in enumerate(self.active_vials):
+                    pipette_commands: dict[int, int] = {}
+                    for pump_id, vial in enumerate(self.active_vials):
                         # no pump detected above this vial (station overhang)
                         if vial is None:
                             continue
@@ -805,21 +996,20 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                         # pump detected above vial
                         # if the pump has the desired fluid_type, set the port and get the volume data
                         if vial:
-                            target_pump = self.pipette_head.pumps[index]
+                            target_pump = self.pipette_head.pumps[pump_id]
                             for fluid_type, volume in getattr(pump_commands, f"vial_{vial}").items():
                                 if target_pump.primary_fluid == FluidTypes[fluid_type]:
-                                    pipette_volumes[index] = volume
+                                    pipette_commands[pump_id] = volume
                                     # Remove the command after use to avoid duplicates
                                     getattr(pump_commands, f"vial_{vial}").pop(fluid_type)
                                     break
 
                     try:
-                        await self.pipette_event(pipette_volumes)
-                    except RoboticsError:
-                        logger.exception("Error running dilution step of influx_snake_helper", stack_info=True)
-                        raise RoboticsError("Error running dilution step of influx_snake_helper")
-
-                    # finished dilutions for current vial_window, moving to next set of vials
+                        await self.pipette_event(pipette_commands)
+                    except (PipetteHeadError, xArmError):
+                        logger.exception("Error running influx step of influx_snake_helper", stack_info=True)
+                        raise
+                    # finished influxs for current vial_window, moving to next set of vials
                     change_row = False
 
                 # change row
@@ -828,14 +1018,14 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 reset_location = station.xArmPlane_out.vial_to_xarm(coordinate)
                 await self.arm.move(reset_location)
             except xArmError:
-                logger.exception("Error moving arm above station at the end of influx_snake_helper()")
-                raise RoboticsError("Error moving arm above station at the end of influx_snake_helper()")
+                logger.exception("Error moving arm above station at the end of influx_snake_helper()", stack_info=True)
+                raise
 
         # update status
         self.active_vials = []
         self.active_station = -1
 
-    async def pipette_event(self, pipette_volumes: list[int], move_arm: bool = False) -> None:
+    async def pipette_event(self, pipette_volumes: dict[int, int], move_arm: bool = False) -> None:
         """Coordinate xArm and PipetteHead for pipetting.
 
         Executes a complete pipetting cycle (aspirate and dispense), optionally
@@ -848,7 +1038,8 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to False.
 
         Raises:
-            RoboticsError: Triggers if PipetteHead or xArm error occurs during aspiration or dispense.
+            PipetteHeadError: re-raise from lower level hardware functions
+            xArmError: re-raise from lower level hardware functions
         """
 
         ################# ASPIRATION STEP #################
@@ -860,18 +1051,24 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
                 if self.arm_command_queue and move_arm:
                     aspiration_tasks.create_task(self.execute_xArm_commands())
-        except (PipetteHeadError, xArmError):
-            logger.exception("Error trying to execute aspiration tasks during pipette_event()", stack_info=True)
-            raise RoboticsError("Error trying to execute aspiration tasks during pipette_event()")
+        except PipetteHeadError:
+            logger.exception("PipetteHead failed during pipette_event aspiration tasks", stack_info=True)
+            raise
+        except xArmError:
+            logger.exception("xArm failed during pipette_event aspiration tasks", stack_info=True)
+            raise
 
         ################# DISPENSE STEP #################
         await self.check_for_interrupt()
         logger.info(f"Running dispense during: {self.routine}")
         try:
             await self.pipette_head.dispense(pipette_volumes)
-        except (PipetteHeadError, xArmError):
-            logger.exception("Error trying to execute dispense during pipette_event()", stack_info=True)
-            raise RoboticsError("Error trying to execute dispense tasks during pipette_event()")
+        except PipetteHeadError:
+            logger.exception("PipetteHead failed during pipette_event dispense tasks", stack_info=True)
+            raise
+        except xArmError:
+            logger.exception("xArm failed during pipette_event dispense tasks", stack_info=True)
+            raise
 
     async def execute_xArm_commands(self) -> None:
         """Execute commands in the xArm command queue.
@@ -896,6 +1093,23 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             except xArmError:
                 logger.exception("Error trying to run execute_xArm_commands", stack_info=True)
                 raise xArmError("Error trying to run execute_xArm_commands")
+
+    async def to_home(self) -> None:
+        """Moves the xArm linearly from standby -> intermediate -> home. Useful for tasks requiring manual intervention
+        (xArm setup & cleanup, for example) and should be called programmatically by client at the end
+        of an experiment.
+        """
+        self.arm_command_queue.append(self.arm.intermediate_position)
+        self.arm_command_queue.append(self.arm.home_position)
+        await self.execute_xArm_commands()
+
+    async def to_standby(self) -> None:
+        """Moves the xArm linearly from home -> intermediate -> standby. xArm must be in standby position prior to running
+        routines that interface with SmartStations (on_influxs and on_fill_vials, for example).
+        """
+        self.arm_command_queue.append(self.arm.intermediate_position)
+        self.arm_command_queue.append(self.arm.home_position)
+        await self.execute_xArm_commands()
 
     async def broadcast(self):
         """Broadcast the current robotics status to all connected clients.
@@ -1013,8 +1227,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
 
         self.state = RoboticsState.STOP
-        self.pipette_head.stop()
-        self.arm.stop()
+        try:
+            self.pipette_head.stop()
+            self.arm.stop()
+        except PipetteHeadError:
+            raise
         logger.info("Robotics namespace put into STOP state, active processes have been exited.")
 
     def pause_robotics(self):
@@ -1025,8 +1242,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
         if self.state == RoboticsState.BUSY:
             self.state = RoboticsState.PAUSE
-            self.pipette_head.pause()
-            self.arm.pause()
+            try:
+                self.pipette_head.pause()
+                self.arm.pause()
+            except PipetteHeadError:
+                raise
         logger.info("Robotics namespace put into PAUSE state")
 
     def resume_robotics(self):
@@ -1038,8 +1258,11 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
         """
         if self.state == RoboticsState.PAUSE:
             self.state = RoboticsState.BUSY
-            self.pipette_head.resume()
-            self.arm.resume()
+            try:
+                self.pipette_head.resume()
+                self.arm.resume()
+            except PipetteHeadError:
+                raise
         logger.info("Robotics namespace put back into BUSY state, resuming previously paused activity.")
 
     def emergency_stop_robotics(self):
@@ -1069,12 +1292,12 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 Defaults to 60. Set to 0 to disable timeout.
 
         Raises:
-            StopRobotics: If a STOP state is detected.
+            StopRobotics: If stop state is detected.
         """
 
         while self.state == RoboticsState.PAUSE:
             if self.state == RoboticsState.STOP:
-                raise StopRobotics
+                raise StopRobotics("Robotics namespace state set to stop")
             else:
                 await asyncio.sleep(0.1)
 
