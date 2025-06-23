@@ -110,7 +110,6 @@ class DummyPump:
     Logs operations instead of performing them.
 
     Attributes:
-        id (int): Unique identifier for the pump.
         enabled (bool): Simulated connection status.
         primary_fluid (FluidTypes): The main fluid type handled by this pump.
         ports (dict[int, PumpPort]): Dictionary mapping port IDs to PumpPort objects.
@@ -118,7 +117,6 @@ class DummyPump:
         active_port (int): Port ID currently selected for operation.
     """
 
-    id: int
     enabled: bool
     primary_fluid: FluidTypes
     ports: dict[int, PumpPort]
@@ -131,7 +129,6 @@ class DummyPump:
         for port_id, port_config in pump_config.get("ports", {}).items():
             ports[port_id] = PumpPort.create(port_id, port_config)
         return cls(
-            id=pump_id,
             primary_fluid=FluidTypes.EMPTY,
             ports=ports,
             head_port=pump_config.get("head_port", 0),
@@ -151,7 +148,7 @@ class DummyPump:
         Logs the connection event but doesn't connect to physical hardware.
         """
 
-        logger.info(f"Enabled dummy pump_{self.id}")
+        logger.info("Enabled dummy pump")
 
     def disable(self, delete: bool = False) -> None:
         """Simulate disabling pump hardware.
@@ -159,11 +156,11 @@ class DummyPump:
         Args:
             delete (bool, optional): Whether to delete the connection object. Defaults to False.
         """
-        logger.info(f"Disabled dummy pump_{self.id}")
+        logger.info("Disabled dummy pump")
 
     def initialize(self) -> None:
         """Simulate initializing the pump hardware."""
-        logger.info(f"Initialized dummy pump_{self.id}")
+        logger.info("Initialized dummy pump")
 
     def aspirate(self, volume: int) -> None:
         """Simulate aspirating fluid.
@@ -171,7 +168,7 @@ class DummyPump:
         Args:
             volume (int): Volume to aspirate in microliters (μL).
         """
-        logger.info(f"Aspirating volume_{volume} on dummy pump_{self.id}")
+        logger.info(f"Aspirating volume_{volume} on dummy pump")
 
     def dispense(self, volume: int) -> None:
         """Simulate dispensing fluid.
@@ -179,31 +176,31 @@ class DummyPump:
         Args:
             volume (int): Volume to dispense in microliters (μL).
         """
-        logger.info(f"Dispensing volume_{volume} on dummy pump_{self.id}")
+        logger.info(f"Dispensing volume_{volume} on dummy pump")
 
     def prime(self) -> None:
         """Simulate priming the pump."""
-        logger.info(f"Priming dummy pump{self.id}")
+        logger.info("Priming dummy pump")
 
     def pause(self) -> None:
         """Simulate pausing the pump operation."""
-        logger.info(f"Pausing dummy pump_{self.id}")
+        logger.info("Pausing dummy pump")
 
     def stop(self) -> None:
         """Simulate stopping the pump operation."""
-        logger.info(f"Stopping dummy pump_{self.id}")
+        logger.info("Stopping dummy pump")
 
     def resume(self) -> None:
         """Simulate resuming a paused operation."""
-        logger.info(f"Resuming dummy pump_{self.id}")
+        logger.info("Resuming dummy pump")
 
-    def update(self, pump_config: dict) -> None:
+    def update(self, pump_config: dict = {}) -> None:
         """Simulate updating pump configuration.
 
         Args:
             pump_config (dict): Updated configuration dictionary.
         """
-        logger.info(f"Updating dummy pump_{self.id}")
+        logger.info(f"Updating dummy pump with {pump_config}")
 
     def to_dict(self) -> dict:
         """Convert the pump to a dictionary representation.
@@ -256,7 +253,6 @@ class XCaliburDPump:
     Controls a Tecan XCaliburD syringe pump via serial communication.
 
     Attributes:
-        id (int): Position in PipetteHead (0 - 3).
         connected (bool): Connection status to the physical pump.
         hardware_api (XCaliburD): The software interface for the pump.
         primary_fluid (FluidTypes): The main fluid type handled by this pump.
@@ -265,7 +261,6 @@ class XCaliburDPump:
         active_port (int): ID of the currently selection PumpPort.
     """
 
-    id: int
     enabled: bool
     hardware_api: XCaliburD = field(repr=False)
     primary_fluid: FluidTypes
@@ -310,23 +305,19 @@ class XCaliburDPump:
         if pump_config["serial_port"]:
             found_serial_port = pump_config["serial_port"]
         else:
-            try:
-                found_serial_port = XCaliburDPump.find_serial_port(pump_id)
-                return cls(
-                    id=pump_id,
-                    hardware_api=XCaliburD(
-                        com_link=TecanAPISerial(pump_id, ser_port=found_serial_port, ser_baud=9600),
-                    ),
-                    primary_fluid=fluid,
-                    ports=ports,
-                    head_port=pump_config.get("head_port", 0),
-                    active_port=0,
-                    enabled=False,
-                    prime_volume=pump_config.get("prime_volume", 5),
-                    max_volume=pump_config.get("max_volume", 1000),
-                )
-            except PipetteHeadError:
-                raise
+            found_serial_port = XCaliburDPump.find_serial_port(pump_id)
+        return cls(
+            hardware_api=XCaliburD(
+                com_link=TecanAPISerial(pump_id, ser_port=found_serial_port, ser_baud=9600),
+            ),
+            primary_fluid=fluid,
+            ports=ports,
+            head_port=pump_config.get("head_port", 0),
+            active_port=0,
+            enabled=False,
+            prime_volume=pump_config.get("prime_volume", 5),
+            max_volume=pump_config.get("max_volume", 1000),
+        )
 
     @staticmethod
     def find_serial_port(pump_id: int) -> str:
@@ -392,7 +383,6 @@ class XCaliburDPump:
             dict: Dictionary containing the current state and configuration of the pump.
         """
         return {
-            "id": self.id,
             "primary_fluid": (self.primary_fluid.name, self.primary_fluid.value),
             "ports": {port_id: port.to_dict() for port_id, port in self.ports.items()},
             "head_port": self.head_port,
@@ -427,13 +417,13 @@ class XCaliburDPump:
             PipetteHeadError: If aspiration fails or the pump is not connected.
         """
         if volume > self.max_volume:
-            raise PipetteHeadError(f"Aborting PipetteHead Pump_{self.id} aspirate, desired volume greater than maximum.")
+            raise PipetteHeadError("Aborting aspirate, desired volume greater than maximum.")
         if self.ports[self.active_port].current_volume < self.ports[self.active_port].starting_volume * 0.1:
             max_port = max(self.ports.keys())
             if self.active_port < max_port:
                 self.active_port += 1
             else:
-                raise PipetteHeadError(f"Aborting PipetteHead Pump_{self.id} aspirate, need to exchange fluid reservoir(s).")
+                raise PipetteHeadError("Aborting aspirate, need to exchange fluid reservoir(s).")
 
         self.hardware_api.extract(self.active_port, volume)
         delay = self.hardware_api.executeChain()
@@ -450,7 +440,7 @@ class XCaliburDPump:
             PipetteHeadError: If dispense fails or the pump is not connected.
         """
         if volume > self.max_volume:
-            raise PipetteHeadError(f"Aborting PipetteHead Pump_{self.id} dispense, desired volume greater than maximum.")
+            raise PipetteHeadError("Aborting dispense, desired volume greater than maximum.")
         self.hardware_api.dispense(self.head_port, volume + self.prime_volume)
         self.hardware_api.extract(self.head_port, volume)
         delay = self.hardware_api.executeChain()
@@ -520,7 +510,7 @@ class PipetteHead:
         dummy_pump_config (ClassVar[dict]): Default configuration for dummy pumps.
     """
 
-    pumps: tuple[PumpProtocol, ...]
+    pumps: dict[int, PumpProtocol]
     pump_num: int
     universal: bool = field(repr=False)
     num_windows: int
@@ -556,20 +546,20 @@ class PipetteHead:
             pipette_head = PipetteHead.create(config)
             ```
         """
-        pumps: list[PumpProtocol] = []
+        pumps: dict[int, PumpProtocol] = {}
         for pump_id in range(4):
             pump_config = config["pumps"][pump_id]
             pump_type_key = pump_config.get("type", "dummy")
             if pump_type_key != "dummy":
-                pumps.append(cls.pump_factory[pump_type_key].create(pump_id, config["pumps"][pump_id]))
+                pumps[pump_id] = cls.pump_factory[pump_type_key].create(pump_id, config["pumps"][pump_id])
             else:
                 try:
-                    pumps.append(cls.pump_factory[pump_type_key].create(pump_id, cls.dummy_pump_config))
+                    pumps[pump_id] = cls.pump_factory[pump_type_key].create(pump_id, cls.dummy_pump_config)
                 except PipetteHeadError:
                     raise
 
-        pump_num: int = sum(1 for pump in pumps if pump.primary_fluid == FluidTypes.EMPTY)
-        universal: bool = all(pump.primary_fluid == pumps[0].primary_fluid for pump in pumps)
+        pump_num: int = sum(1 for pump in pumps.values() if pump.primary_fluid == FluidTypes.EMPTY)
+        universal: bool = all(pump.primary_fluid == pumps[0].primary_fluid for pump in pumps.values())
         num_windows: int = 0
         if pump_num != 0 and universal:
             num_windows = int((6 / pump_num) + 0.5)
@@ -577,7 +567,7 @@ class PipetteHead:
             num_windows = 6 + (pump_num - 1)
 
         return cls(
-            pumps=tuple(pumps),
+            pumps=pumps,
             pump_num=pump_num,
             universal=universal,
             num_windows=num_windows,
@@ -658,10 +648,12 @@ class PipetteHead:
             self.active_pumps.remove(self.pumps[pump_id])
 
     async def aspirate(self, aspirate_commands: dict[int, int]):
-        """Coordinates multi-pump aspirate operations within the PipetteHead.
+        """Coordinates multi-pump aspirate operations.
 
-        Runs all pump aspirate operatioins sequentially in a separate thread to avoid
-        blocking the event loop since PipetteHead pumps share the same serial line.
+        Concurrently executes PipetteHead aspirate calls based on the incoming commands. Assumes
+        that PipetteHead pumps are on their own serial port, or else this function needs to be modified to
+        run sequential pump operations in a separate thread to avoid blocking the event loop (i.e. asyncio.to_thread)
+        Ensures that aspirate volumes are positive prior to executing.
 
         Args:
             aspirate_volumes (dict[int, int]): Maps aspirate volume to syringe pump ID key.
@@ -675,55 +667,61 @@ class PipetteHead:
             # Pump 0 aspirates 100μL, pump 2 aspirates 50μL
             ```
         """
-        for pump_id, pump in enumerate(self.pumps):
-            if aspirate_commands[pump_id] < 0:
+        for pump_id, aspirate_volume in aspirate_commands.items():
+            if aspirate_volume < 0:
                 raise PipetteHeadError(f"Negative volume input detected when trying to aspirate PipettteHead Pump ID {pump_id}")
 
-        def perform_aspirations():
-            for pump_id, pump in enumerate(self.pumps):
-                self.active_pumps.append(pump)
-                try:
-                    pump.aspirate(aspirate_commands[pump_id])
-                except (SyringeError, SyringeTimeout) as e:
-                    raise PipetteHeadError(f"Error trying to aspirate PipetteHead Pump_{pump_id}") from e
-                finally:
-                    self.active_pumps.remove(pump)
+        async def aspirate_task(pump_id, volume):
+            pump: PumpProtocol = self.pumps[pump_id]
+            self.active_pumps.append(pump)
+            try:
+                pump.aspirate(volume)
+            except (SyringeError, SyringeTimeout) as e:
+                raise PipetteHeadError(f"Error trying to aspirate PipetteHead Pump_{pump_id}") from e
+            finally:
+                self.active_pumps.remove(pump)
 
-        await asyncio.to_thread(perform_aspirations)
+        async with asyncio.TaskGroup() as pipette_head_aspiration_tasks:
+            for pump_id, volume in aspirate_commands.items():
+                pipette_head_aspiration_tasks.create_task(aspirate_task(pump_id, volume))
 
-    async def dispense(self, dispense_volumes: dict[int, int]):
-        """Coordinates multi-pump dispense operations within the PipetteHead.
+    async def dispense(self, dispense_commands: dict[int, int]):
+        """Coordinates multi-pump dispense operations.
 
-        Runs all pump dispense operations sequentially in a separate thread to avoid
-        blocking the event loop since PipetteHead pumps share the same serial line.
+        Concurrently executes PipetteHead dispense calls based on the incoming commands. Assumes
+        that PipetteHead pumps are on their own serial port, or else this function needs to be modified to
+        run sequential pump operations in a separate thread to avoid blocking the event loop (i.e. asyncio.to_thread)
+        Ensures that dispense volumes are positive prior to executing.
 
         Args:
-            dispense_volumes (dict[int,int]): Maps dispense volume to syringe pump ID key.
+            dispense_commands (dict[int, int]): Maps aspirate volume to syringe pump ID key.
 
         Raises:
-            PipetteHeadError: If any dispense volume is negative.
+            PipetteHeadError: If any aspirate volume is negative.
 
         Examples:
             ```
-            await pipette_head.dispense([100, 0, 50, 0])
-            # Pump 0 dispenses 100μL, pump 2 dispenses 50μL
+            await pipette_head.dispense({0: 100, 1: 0, 2: 50, 3: 0})
+            # Pump 0 aspirates 100μL, pump 2 aspirates 50μL
             ```
         """
-        for pump_id, pump in enumerate(self.pumps):
-            if dispense_volumes[pump_id] < 0:
-                raise PipetteHeadError(f"Negative volume input detected when trying to dispense PipettteHead Pump ID {pump_id}")
+        for pump_id, aspirate_volume in dispense_commands.items():
+            if aspirate_volume < 0:
+                raise PipetteHeadError(f"Negative volume input detected when trying to dispense PipettteHead Pump {pump_id}")
 
-        def perform_dispenses():
-            for pump_id, pump in enumerate(self.pumps):
-                self.active_pumps.append(pump)
-                try:
-                    pump.dispense(dispense_volumes[pump_id])
-                except (SyringeError, SyringeTimeout) as e:
-                    raise PipetteHeadError(f"Error trying to dispense PipetteHead Pump_{pump_id}") from e
-                finally:
-                    self.active_pumps.remove(pump)
+        async def dispense_task(pump_id, volume):
+            pump: PumpProtocol = self.pumps[pump_id]
+            self.active_pumps.append(pump)
+            try:
+                pump.dispense(volume)
+            except (SyringeError, SyringeTimeout) as e:
+                raise PipetteHeadError(f"Error trying to dispense PipetteHead Pump {pump_id}") from e
+            finally:
+                self.active_pumps.remove(pump)
 
-        await asyncio.to_thread(perform_dispenses)
+        async with asyncio.TaskGroup() as pipette_head_aspiration_tasks:
+            for pump_id, volume in dispense_commands.items():
+                pipette_head_aspiration_tasks.create_task(dispense_task(pump_id, volume))
 
     async def initialize(self, pump_list: list[int]):
         """Initialize the specified pumps.
@@ -755,7 +753,7 @@ class PipetteHead:
         """
 
         return {
-            "pumps": [{pump.id: pump.to_dict() for pump in self.pumps}],
+            "pumps": {pump_id: pump.to_dict() for pump_id, pump in self.pumps.items()},
             "pump_num": self.pump_num,
             "universal": self.universal,
             "num_windows": self.num_windows,
@@ -781,5 +779,5 @@ class PipetteHead:
             pipette_head.update(config_update)
             ```
         """
-        for pump_id, pump in enumerate(self.pumps):
+        for pump_id, pump in self.pumps.items():
             pump.update(pipette_head_config["pumps"][pump_id])

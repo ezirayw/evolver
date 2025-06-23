@@ -759,7 +759,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             client.prime_syringe_pumps([0, 1])
             ```
         """
-        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        valid_pump_ids = [valid_pump_id for valid_pump_id in self.pipette_head.pumps]
         for pump_id in pump_list:
             if pump_id not in valid_pump_ids:
                 logger.error(f"Aborting on_prime_pipettehead routine, invalid pump_id detected: {pump_id}")
@@ -784,7 +784,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
             client.initialize_pumps([0, 1])
             ```
         """
-        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        valid_pump_ids = [valid_pump_id for valid_pump_id in self.pipette_head.pumps]
         for pump_id in pump_list:
             if pump_id not in valid_pump_ids:
                 logger.error(f"Aborting on_initialize_pipettehead routine, invalid pump_id detected: {pump_id}")
@@ -816,7 +816,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
                 logger.error(f"Aborting on_pipette routine, negative volume detected: {pipette_volume}")
                 raise RoboticsRoutineError(f"Aborting on_pipette routine, negative volume detected: {pipette_volume}")
 
-        valid_pump_ids = [valid_pump.id for valid_pump in self.pipette_head.pumps]
+        valid_pump_ids = [valid_pump_id for valid_pump_id in self.pipette_head.pumps]
         for pump_id in pipette_commands:
             if pump_id not in valid_pump_ids:
                 logger.error(f"Aborting pipette routine, invalid pump_id detected: {pump_id}")
@@ -1274,7 +1274,7 @@ class RoboticsServerNamespace(socketio.AsyncNamespace):
 
         try:
             self.stop_robotics()
-            for pump in self.pipette_head.pumps:
+            for pump in self.pipette_head.pumps.values():
                 pump.disable(delete=True)
             self.arm.disconnect()
         except (SyringeError, SyringeTimeout):

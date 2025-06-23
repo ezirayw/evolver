@@ -16,7 +16,6 @@ class PumpProtocol(Protocol):
         primary_fluid (FluidTypes): The main fluid type handled by this pump.
     """
 
-    id: int
     enabled: bool
     primary_fluid: FluidTypes
 
