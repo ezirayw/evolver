@@ -124,7 +124,7 @@ class HTEvolverClient:
             >>> # Override the state of the robotics system
             >>> client.override("state", 0)
             >>> # Override configuration parameters
-            >>> client.override("config", {"pipette_speed": 10})
+            >>> client.override("config", {"dipense_speed": 10})
         """
 
         valid_parameters: list[str] = ["state", "routine", "config"]
@@ -384,7 +384,7 @@ class HTEvolverClient:
             >>> # Get the entire robotics configuration
             >>> config = client.request_robotics_config()
             >>> # Get a specific configuration parameter
-            >>> pipette_config = client.request_robotics_config("pipette_head")
+            >>> dipense_config = client.request_robotics_config("dipense_head")
         """
         logger.info("HT-eVOLVER client requesting robotics configuration.")
         self.robotics._request_robotics_config()
@@ -393,45 +393,45 @@ class HTEvolverClient:
         else:
             return self.robotics.server_config
 
-    def pipette(self, pipette_commands: dict[int, int]):
+    def dipense(self, dipense_commands: dict[int, int]):
         """Execute a pipetting operation.
 
-        Sends a pipette command to the robotics system to aspirate and dispense
+        Sends a dipense command to the robotics system to aspirate and dispense
         fluids with the specified volumes.
 
         Args:
-            pipette_commands (dict): Map pipette volumes (in μL) to PipetteHead Pump ID keys.
+            dipense_commands (dict): Map dipense volumes (in μL) to DispenseHead Pump ID keys.
 
         Examples:
-            >>> # Pipette 100μL from pump 0 and 200μL from pump 2
-            >>> client.pipette({0:100, 2:200})
+            >>> # Dispense 100μL from pump 0 and 200μL from pump 2
+            >>> client.dipense({0:100, 2:200})
         """
-        logger.info(f"HT-eVOLVER client sending the following PipetteHead pipettte command: {pipette_commands}")
-        self.robotics._pipette(pipette_commands)
+        logger.info(f"HT-eVOLVER client sending the following DispenseHead pipettte command: {dipense_commands}")
+        self.robotics._dipense(dipense_commands)
 
-    def prime_pipettehead(self, prime_commands: list[int]):
+    def prime_dipensehead(self, prime_commands: list[int]):
         """Prime the specified syringe pumps.
 
         Sends a command to prime the specified syringe pumps. Priming fills the tubing for influx usage. For each syringe pump
-        specified, priming cycle will pipette set volume for all configured ports to fill tubing lines. Required prior to running
+        specified, priming cycle will dipense set volume for all configured ports to fill tubing lines. Required prior to running
         influx operations.
 
         Args:
-            prime_commands (list): List of PipetteHead Pump IDs to prime.
+            prime_commands (list): List of DispenseHead Pump IDs to prime.
                 Example: [0, 1] to prime pumps 0 and 1.
 
         Examples:
             >>> # Prime pumps 0 and 1
-            >>> client.prime_pipettehead([0, 1])
+            >>> client.prime_dipensehead([0, 1])
         """
-        logger.info(f"HT-eVOLVER client sending the following PipetteHead prime command: {prime_commands}")
-        self.robotics._prime_pipettehead(prime_commands)
+        logger.info(f"HT-eVOLVER client sending the following DispenseHead prime command: {prime_commands}")
+        self.robotics._prime_dipensehead(prime_commands)
 
     def influx(self, influx_commands: dict):
         """Execute influx in specific vials across SmartStations.
 
-        Sends a influx command to the robotics system to pipette target fluids into specified SmartStation vials.
-        Vials can receive influx inputs from any configured PipetteHead syringe pump. Influx volume inputs cannot
+        Sends a influx command to the robotics system to dipense target fluids into specified SmartStation vials.
+        Vials can receive influx inputs from any configured DispenseHead syringe pump. Influx volume inputs cannot
         exceed the physical capacity of the syringe pump.
 
         Args:

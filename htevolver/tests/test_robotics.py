@@ -53,7 +53,7 @@ def get_options():
         nargs="*",
         type=lambda s: int(s),
         required=False,
-        help="List of PipetteHead Pump IDs to use during pipetting and PipetteHead priming (space separated).",
+        help="List of DispenseHead Pump IDs to use during pipetting and DispenseHead priming (space separated).",
         default=DEFAULT_PUMP_LIST,
     )
 
@@ -81,20 +81,20 @@ def get_options():
     return parser.parse_args(), parser
 
 
-def build_pipette_request(pump_list: list[int]) -> dict:
-    pipette_commands: dict[int, int] = {}
+def build_dipense_request(pump_list: list[int]) -> dict:
+    dipense_commands: dict[int, int] = {}
     for pump_id in pump_list:
         while True:
             try:
-                volume_input = int(input(f"Enter pipette volume for PipetteHead Pump_{pump_id} (µL): "))
+                volume_input = int(input(f"Enter dipense volume for DispenseHead Pump_{pump_id} (µL): "))
                 if volume_input < 0:
-                    logger.error("Invalid pipette volume entered, must be positive.")
+                    logger.error("Invalid dipense volume entered, must be positive.")
                 else:
-                    pipette_commands[pump_id] = volume_input
+                    dipense_commands[pump_id] = volume_input
                     break
             except ValueError:
-                logger.error("Invalid pipette volume input, try again.")
-    return pipette_commands
+                logger.error("Invalid dipense volume input, try again.")
+    return dipense_commands
 
 
 def build_influx_request(use_liquid: bool, station_list: list[int], fluid_types: list[str]) -> dict:
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     config = htevolver_client.request_robotics_config()
     fluid_types: list[str] = []
     if config:
-        for pump_id, pump_config in config["pipette_head"]["pumps"].items():
+        for pump_id, pump_config in config["dipense_head"]["pumps"].items():
             fluid_types.append(pump_config["fluid"])
 
     else:
@@ -189,13 +189,13 @@ if __name__ == "__main__":
 
     if robotic_function == "PIPETTE":
         if use_liquid and pump_list:
-            pipette_request = build_pipette_request(pump_list)
-            htevolver_client.pipette(pipette_request)
+            dipense_request = build_dipense_request(pump_list)
+            htevolver_client.dipense(dipense_request)
         elif not use_liquid:
             logger.error("Aborting, liquid flag is required for pipetting.")
             sys.exit()
         elif not pump_list:
-            logger.error("Aborting, must enter list of PipetteHead Pump IDs for pipetting.")
+            logger.error("Aborting, must enter list of DispenseHead Pump IDs for pipetting.")
             sys.exit()
 
     if robotic_function == "PRIME":
@@ -204,25 +204,25 @@ if __name__ == "__main__":
                 try:
                     prime_cylces_input = int(input("Enter number of prime cycles to run: "))
                     if prime_cylces_input > 0:
-                        htevolver_client.prime_pipettehead(pump_list)
+                        htevolver_client.prime_dipensehead(pump_list)
 
                 except ValueError:
                     logger.warning("Invalid number of prime cycles entered, try again.")
         elif not use_liquid:
-            logger.error("Aborting, liquid flag is required for priming PipetteHead.")
+            logger.error("Aborting, liquid flag is required for priming DispenseHead.")
             sys.exit()
         elif not pump_list:
-            logger.error("Aborting, must enter list of PipetteHead Pump IDs to prime.")
+            logger.error("Aborting, must enter list of DispenseHead Pump IDs to prime.")
             sys.exit()
 
     if robotic_function == "INFLUX":
-        pipettehead_config = htevolver_client.request_robotics_config("pipette_head")
+        dipensehead_config = htevolver_client.request_robotics_config("dipense_head")
         fluid_types: list[str] = []
-        if pipettehead_config:
-            for pump_id, pump_config in pipettehead_config.items():
+        if dipensehead_config:
+            for pump_id, pump_config in dipensehead_config.items():
                 fluid_types.append(pump_config["fluid"])
 
-            logger.info(f"PipetteHead configured with the fluid type: {fluid_types}")
+            logger.info(f"DispenseHead configured with the fluid type: {fluid_types}")
 
         influx_request = build_influx_request(use_liquid, station_list, fluid_types)
         htevolver_client.influx(influx_request)

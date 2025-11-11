@@ -78,12 +78,12 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
 
         Processes broadcast data received from the server, which includes
         the current state of the robotics system, active operations, and
-        the status of the xArm and PipetteHead.
+        the status of the xArm and DispenseHead.
 
         Args:
             broadcast_data (dict): Broadcast data received from the server, containing
                 status information about the robotics system, including state, routine,
-                active stations, xArm status and pipette head status.
+                active stations, xArm status and dipense head status.
         """
         self.status.robotics = status
         logger.info(f"Robotics namespace broadcast: {self.status.robotics}")
@@ -125,21 +125,21 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         logger.info("Disconnecting xArm from HTeVOLVER server")
 
     def _enable_influx(self):
-        """Request the server to enable PipetteHead syringe pumps.
+        """Request the server to enable DispenseHead syringe pumps.
 
-        PipetteHead must be enabled prior to running any influx operations.
+        DispenseHead must be enabled prior to running any influx operations.
         """
 
         self.emit("enable_influx")
-        logger.info("Enabling PipetteHead syringe pumps on HTeVOLVER server")
+        logger.info("Enabling DispenseHead syringe pumps on HTeVOLVER server")
 
     def _disable_influx(self):
-        """Request the server to disable PipetteHead syringe pumps.
+        """Request the server to disable DispenseHead syringe pumps.
 
         Useful for preventing unwanted influx operations.
         """
         self.emit("disable_influx")
-        logger.info("Disabling PipetteHead syringe pumps on HTeVOLVER server")
+        logger.info("Disabling DispenseHead syringe pumps on HTeVOLVER server")
 
     def _override(self, override_commands: dict):
         """Override the robotics status on the server.
@@ -157,7 +157,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         """Pause active routines in the robotics namespace backend.
 
         Requests the server to put the robotics namespace into a pause state. Suspends any active
-        PipetteHead and xArm operations.
+        DispenseHead and xArm operations.
         """
         self.emit("pause_robotics")
         logger.info("Paused experiment")
@@ -166,7 +166,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         """Resumes recently paused routines in the robotics namespace backend.
 
         Requests the server to put the robotics namespace into a resume state. Resumes paused
-        PipetteHead and xArm operations.
+        DispenseHead and xArm operations.
         """
         self.emit("resume_robotics")
         logger.info("Resumed experiment")
@@ -174,7 +174,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
     def _stop(self):
         """Kills active robotics routines in the robotics namespace backend.
 
-        Requests the server to put the robotics namespace into a stop state. Kills PipetteHead and xArm
+        Requests the server to put the robotics namespace into a stop state. Kills DispenseHead and xArm
         operations and gracefully exits active robotic routines.
         """
         self.emit("stop_robotics")
@@ -203,38 +203,38 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
             return False
 
     @routine_decorator
-    def _pipette(self, pipette_commands: dict[int, int]):
-        """Execute a basic pipette operation with the PipetteHead
+    def _dipense(self, dipense_commands: dict[int, int]):
+        """Execute a basic dipense operation with the DispenseHead
 
-        Requests the server to perform a pipetting operation with the PipetteHead.
+        Requests the server to perform a pipetting operation with the DispenseHead.
         Puts the robotics namespace into a busy state.
 
         Args:
-            pipette_commands (dict): Dictionary containing pipette commands.
-                Key value pairs map to PipetteHead Pump ID and pipette volume.
+            dipense_commands (dict): Dictionary containing dipense commands.
+                Key value pairs map to DispenseHead Pump ID and dipense volume.
         """
-        self.emit("pipette_routine", pipette_commands)
+        self.emit("dipense_routine", dipense_commands)
 
     @routine_decorator
-    def _prime_pipettehead(self, prime_commands: list[int]):
-        """Execute a PipetteHead priming cycle
+    def _prime_dispensehead(self, prime_commands: list[int]):
+        """Execute a DispenseHead priming cycle
 
-        Requests the server to prime the specified syringe pumps on the PipetteHead. Function is expected to be called
+        Requests the server to prime the specified syringe pumps on the DispenseHead. Function is expected to be called
         repeatedly with experimenter input to ensure that lines are completely filled prior to running experiments.
         Puts the robotics namespace into a busy state.
 
          Args:
-             prime_commands (list): List containing PipetteHead Pump IDs to prime
-             volume (int): Volume to pipette during priming. Defaults to 10mL
+             prime_commands (list): List containing DispenseHead Pump IDs to prime
+             volume (int): Volume to dipense during priming. Defaults to 10mL
         """
-        self.emit("prime_pipettehead", prime_commands)
+        self.emit("prime_dispensehead", prime_commands)
 
     @routine_decorator
     def _influx(self, influx_commands: dict):
-        """Execute a influx routine across SmartStation vials with the PipetteHead.
+        """Execute a influx routine across SmartStation vials with the DispenseHead.
 
         Requests the server to perform an influx cycle across HT-eVOLVER based on the specified target vials and influx volume
-        inputs. Coordinates xArm to move PipetteHead in a snake pattern across target SmartStations. Puts robotics namespace into
+        inputs. Coordinates xArm to move DispenseHead in a snake pattern across target SmartStations. Puts robotics namespace into
         a busy state
 
         Args:

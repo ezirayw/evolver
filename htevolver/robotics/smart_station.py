@@ -1,6 +1,5 @@
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import ClassVar
 
 import numpy as np
 import skimage as ski
@@ -146,14 +145,12 @@ class SmartStationRobotics:
         xArmPlane_out (xArmPlane): Transformation plane for above-vial positions.
         wash_location (VialCoordinate): Location of the wash station in vial coordinates.
         wash_depth (float): Depth for washing operations.
-        vial_map (ClassVar[list[list[int]]]): Standard mapping of vial IDs in the grid layout.
     """
 
     xArmPlane_in: xArmPlane
     xArmPlane_out: xArmPlane
     wash_location: VialCoordinate
     wash_depth: float
-    vial_map: ClassVar[list[list[int]]] = [[0, 1, 2, 3, 4, 5], [11, 10, 9, 8, 7, 6], [12, 13, 14, 15, 16, 17]]
 
     @classmethod
     def create(cls, config: dict):

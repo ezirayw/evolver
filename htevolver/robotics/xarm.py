@@ -208,7 +208,7 @@ class xArm:
         if result[0] == 0:
             return result[1]
 
-    async def move(self, coordinate: xArmCoordinate):
+    def move(self, coordinate: xArmCoordinate):
         """Move the xArm linearly to the specified coordinate.
 
         Executes an immediate linear movement from the current position

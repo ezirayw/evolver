@@ -6,31 +6,11 @@ states:
   - exit
   - busy
 routines:
-  - influx
-  - pipetting
-  - filling_vials
-  - priming_influx
-  - priming_efflux
-
-# ipp settings
-ipp_mapping:
-  quad_0_efflux:
-    solenoid_numbers: [0, 1, 2]
-    ipp_number: 1
-  quad_1_efflux:
-    solenoid_numbers: [3, 4, 5]
-    ipp_number: 2
-  quad_2_efflux:
-    solenoid_numbers: [8, 9, 10]
-    ipp_number: 3
-  quad_3_efflux:
-    solenoid_numbers: [11, 12, 13]
-    ipp_number: 4
-
-ipp_efflux_settings:
-  frequency: 5 # Hz
-  duration: 30 # seconds
-  polarity: 0 # towards waste
+  - passage
+  - dipense
+  - fill_vials
+  - prime_influx
+  - prime_efflux
 
 wash_settings:
   submersed_time: 10 # seconds
@@ -38,7 +18,7 @@ wash_settings:
 
 xArm:
   enabled: False
-  ip: "192.168.1.200"
+  ip: "192.168.1.244"
   roll: 180
   pitch: 0
   yaw: 0
@@ -57,57 +37,82 @@ xArm:
     y: -355
     z: 500
 
-pipette_head:
-  enabled: False
-  pumps:
-    0:
-      serial_port: ""
-      fluid: media
-      type: dummy
-      head_port: 1
-      ports:
-        2:
-          primed: False
-          volume: 0
-        3:
-          primed: False
-          volume: 0
-    1:
-      serial_port: ""
-      fluid: media
-      type: dummy
-      head_port: 1
-      ports:
-        2:
-          primed: False
-          volume: 0
-        3:
-          primed: False
-          volume: 0
-    2:
-      serial_port: ""
-      fluid: media
-      type: dummy
-      head_port: 1
-      ports:
-        2:
-          primed: False
-          volume: 0
-        3:
-          primed: False
-          volume: 0
-    3:
-      serial_port: ""
-      fluid: media
-      type: dummy
-      head_port: 1
-      ports:
-        2:
-          primed: False
-          volume: 0
-        3:
-          primed: False
-          volume: 0
+dipense_heads:
+  media:
+    head_id: 0
+    type: DispenseHeadXCaliburD
+    pump_number: 3
+    pump_type: dummy
+    in_use: True
+    enabled: True
+    reservoirs:
+      0:
+        "fluid_type": "blank"
+        "starting": 1000 # mL
+        "current_volume": 1000 # mL
+        "threshold": 0.1
+      1:
+        "fluid_type": "blank"
+        "starting": 1000 # mL
+        "current_volume": 1000 # mL
+    pumps:
+      0:
+        number_ports: 3
+        syringe_volume: 1000 #uL
+        direction: CW
+        microstep: False
+        waste_port_id: 3
+        head_port_id: 1
+        slope: 14
+        init_force: 0
+        ports:
+          2:
+            active: True
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
+          3:
+            active: False
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
+      1:
+        number_ports: 3
+        syringe_volume: 1000 #uL
+        direction: CW
+        microstep: False
+        waste_port_id: 3
+        head_port_id: 1
+        slope: 14
+        init_force: 0
+        ports:
+          2:
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
+
+          3:
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
+      2:
+        number_ports: 3
+        syringe_volume: 1000 #uL
+        direction: CW
+        microstep: False
+        waste_port_id: 3
+        head_port_id: 1
+        slope: 14
+        init_force: 0
+        ports:
+          2:
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
+          3:
+            primed: False
+            volume_consumed: 0
+            reservoir_id: 0
 
 smart_stations:
   0:
