@@ -1,21 +1,4 @@
 ---
-states:
-  - idle
-  - pause
-  - emergency_stop
-  - exit
-  - busy
-routines:
-  - passage
-  - dipense
-  - fill_vials
-  - prime_influx
-  - prime_efflux
-
-wash_settings:
-  submersed_time: 10 # seconds
-  dry_time: 10 # seconds
-
 xArm:
   enabled: False
   ip: "192.168.1.244"
@@ -24,37 +7,36 @@ xArm:
   yaw: 0
   speed: 100
   mvacc: 100
-  home_position:
-    x: 207
-    y: 0
-    z: 112
-  intermediate_position:
-    x: 207
-    y: 0
-    z: 500
-  standby_position:
-    x: 40
-    y: -355
-    z: 500
+  reference_positions:
+    home_position:
+      x: 207
+      y: 0
+      z: 112
+    standby_position:
+      x: 207
+      y: 0
+      z: 500
+    tool_0:
+      x: None
+      y: None
+      z: None
 
 dipense_heads:
   media:
     head_id: 0
-    type: DispenseHeadXCaliburD
+    pump_type: DispenseHeadXCaliburD
     pump_number: 3
-    pump_type: dummy
     in_use: True
     enabled: True
     reservoirs:
       0:
-        "fluid_type": "blank"
         "starting": 1000 # mL
         "current_volume": 1000 # mL
         "threshold": 0.1
       1:
-        "fluid_type": "blank"
         "starting": 1000 # mL
         "current_volume": 1000 # mL
+        "threshold": 0.1
     pumps:
       0:
         number_ports: 3
@@ -87,11 +69,12 @@ dipense_heads:
         init_force: 0
         ports:
           2:
+            active: True
             primed: False
             volume_consumed: 0
             reservoir_id: 0
-
           3:
+            active: False
             primed: False
             volume_consumed: 0
             reservoir_id: 0
@@ -106,21 +89,18 @@ dipense_heads:
         init_force: 0
         ports:
           2:
+            active: True
             primed: False
             volume_consumed: 0
             reservoir_id: 0
           3:
+            active: False
             primed: False
             volume_consumed: 0
             reservoir_id: 0
 
 smart_stations:
   0:
-    connect: True
-    wash_location:
-      x: 72
-      y: -29
-    wash_depth: 0
     plane_out:
       vial0_x: 79
       vial0_y: -471
@@ -134,33 +114,11 @@ smart_stations:
       vial17_y: -381.2
       z: 429.5
   1:
-    connect: False
-    wash_location:
-      x: 72
-      y: -29
-    wash_depth: 0
     plane_out: null
     plane_in: null
   2:
-    connect: False
-    wash_location:
-      x: 72
-      y: -29
-    wash_depth: 0
     plane_out: null
     plane_in: null
   3:
-    connect: False
-    wash_location:
-      x: 72
-      y: -29
-    wash_depth: 0
     plane_out: null
     plane_in: null
-
-# overflow/volume settings
-overflow_voltage_step: 0.66 # voltage step amount to map onto trigger_map to identify overflow vial
-overflow_voltage_threshold: 0.33 # +/- value used in reference to overflow_voltage_step to account for noisy voltages
-overflow_trigger_map:
-  left: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3]
-  right: [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4]

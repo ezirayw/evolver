@@ -386,7 +386,7 @@ class EvolverClientNamespace(socketio.ClientNamespace):
         for station_id, frequency in frequency_commands.items():
             self.stations[station_id].efflux_board.ipp_frequency = frequency
 
-    def _run_ipps(self, ipp_commands: dict[int, int]):
+    def _run_efflux(self, ipp_commands: dict[int, int]):
         """Actuate integrated peristaltic pumps.
 
         Actuates the IPPs to pump desired volumes across one or more SmartStations.

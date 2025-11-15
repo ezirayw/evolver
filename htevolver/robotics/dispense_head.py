@@ -190,7 +190,7 @@ def pump_action_class(func: Callable):
 
 
 class DispenseHeadXCaliburD:
-    """Manages a dispense operations for a set of XCaliburD syringe pumps."""
+    """HT-eVOLVER DispenseHead class using XCaliburD syringe pumps. Subtype of the DispenseHeadProtocol."""
 
     base_address: int = 0x31
     address_all_pumps: int = 0x5F
@@ -205,27 +205,6 @@ class DispenseHeadXCaliburD:
 
     communication_interface: UFactoryAPISerial | None = None
     all_pump_interface: XCaliburD | None = None
-
-    @classmethod
-    def set_communication_interface(cls, xarm_instance: XArmAPI):
-        DispenseHeadXCaliburD.communication_interface = UFactoryAPISerial(xarm_instance)
-
-    @classmethod
-    def create_all_pump(cls):
-        if not cls.communication_interface:
-            raise (DispenseHeadError("UFactoryAPISerial interface not yet setup for XCaliburD pumps"))
-
-        cls.all_pump_interface: XCaliburD | None = XCaliburD(
-            num_ports=cls.default_num_ports,
-            com_link=cls.communication_interface,
-            address=0x5F,
-            syringe_ul=cls.default_syringe_ul,
-            direction=cls.default_direction,
-            microstep=cls.default_microstep,
-            waste_port=cls.default_waste_port,
-            slope=cls.default_slope,
-            init_force=cls.default_init_force,
-        )
 
     def __init__(self, head_id: int, pump_number: int, in_use=False, enabled=False):
         self.head_id = head_id
@@ -254,6 +233,27 @@ class DispenseHeadXCaliburD:
                 self.ports[pump_id][port_id] = PumpPort(volume_consumed=0, reservoir_id=0, primed=False, active=False)
 
     @classmethod
+    def set_communication_interface(cls, xarm_instance: XArmAPI):
+        DispenseHeadXCaliburD.communication_interface = UFactoryAPISerial(xarm_instance)
+
+    @classmethod
+    def create_all_pump(cls):
+        if not cls.communication_interface:
+            raise (DispenseHeadError("UFactoryAPISerial interface not yet setup for XCaliburD pumps"))
+
+        cls.all_pump_interface: XCaliburD | None = XCaliburD(
+            num_ports=cls.default_num_ports,
+            com_link=cls.communication_interface,
+            address=0x5F,
+            syringe_ul=cls.default_syringe_ul,
+            direction=cls.default_direction,
+            microstep=cls.default_microstep,
+            waste_port=cls.default_waste_port,
+            slope=cls.default_slope,
+            init_force=cls.default_init_force,
+        )
+
+    @classmethod
     def from_config(cls, head_config: dict) -> "DispenseHeadXCaliburD":
         """Create a new DispenseHead instance from a loaded configuration.
 
@@ -262,7 +262,7 @@ class DispenseHeadXCaliburD:
                 Must include a 'pumps' key with per-pump configuration dictionaries.
 
         Returns:
-            DispenseHeadXCaliburD: A new instance of DispenseHead with configured pumps.
+            DispenseHeadXCaliburD: A newly, configured DispenseHead instance.
 
         Examples:
             ```
@@ -388,11 +388,8 @@ class DispenseHeadXCaliburD:
 
     def validate_volume(self, input_volume: int) -> bool:
         """Validate the input volume against the configurations of the XCaliburD pumps"""
-        if input_volume < 0:
-            return False
         for pump in self.pumps.values():
             if input_volume > pump.syringe_ul:
-                logger.warning("Input volume is larger syringe size")
                 return False
         return True
 
@@ -452,7 +449,7 @@ class DispenseHeadXCaliburD:
         self.enable = True
 
     @pump_action
-    def aspirate(self, aspirate_commands: list[int]):
+    async def aspirate(self, aspirate_commands: list[int]):
         """Coordinates multi-pump aspirate operations for the DispenseHead. Port selection for each syringe pump is handling automatically by checking reservoir volumes.
 
         Args:

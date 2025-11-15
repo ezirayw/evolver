@@ -1,10 +1,12 @@
 import logging
 import time
+from dataclasses import asdict
 from typing import Callable
 
 import socketio
 
-from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState
+from htevolver.exceptions import ClientError
+from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState, StationInfluxCommand
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +54,10 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         ack (bool): Acknowledgment flag for communication.
     """
 
-    def __init__(self, save: bool, directory: str, status: HTEvolverStatus, namespace: str = "/robotics"):
-        super().__init__(namespace)
+    namespace: str = "/robotics"
+
+    def __init__(self, save: bool, directory: str, status: HTEvolverStatus):
+        super().__init__(RoboticsClientNamespace.namespace)
         self.save: bool = save
         self.directory: str = directory
         self.status: HTEvolverStatus = status
@@ -81,9 +85,7 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         the status of the xArm and DispenseHead.
 
         Args:
-            broadcast_data (dict): Broadcast data received from the server, containing
-                status information about the robotics system, including state, routine,
-                active stations, xArm status and dipense head status.
+            broadcast_data (dict): Broadcast data received from the server.
         """
         self.status.robotics = status
         logger.info(f"Robotics namespace broadcast: {self.status.robotics}")
@@ -109,74 +111,80 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
         logger.info("Finished processing robotics namespace configuration request.")
 
     def _connect_xArm(self):
-        """Request the server to connect to the xArm.
-
-        Requests server to establish a connection with the xArm via its Python SDK API interface.
-        """
+        """Request the server to connect to the xArm."""
         self.emit("connect_xArm")
-        logger.info("Connecting xArm to HTeVOLVER server")
+        logger.info("Connecting xArm to HTeVOLVER")
 
     def _disconnect_xArm(self):
-        """Request the server to disconnect to the xArm.
-
-        Requests server to disconnect from the xArm via its Python SDK API interface.
-        """
+        """Request the server to disconnect from the xArm."""
         self.emit("disconnect_xArm")
-        logger.info("Disconnecting xArm from HTeVOLVER server")
+        logger.info("Disconnecting xArm from HTeVOLVER")
 
-    def _enable_influx(self):
-        """Request the server to enable DispenseHead syringe pumps.
+    def _reset_xArm(self):
+        """Request the server to reset connection to the xArm."""
+        self.emit("reset_xArm")
+        logger.info("Resetting xArm")
 
-        DispenseHead must be enabled prior to running any influx operations.
-        """
-
-        self.emit("enable_influx")
-        logger.info("Enabling DispenseHead syringe pumps on HTeVOLVER server")
-
-    def _disable_influx(self):
-        """Request the server to disable DispenseHead syringe pumps.
-
-        Useful for preventing unwanted influx operations.
-        """
-        self.emit("disable_influx")
-        logger.info("Disabling DispenseHead syringe pumps on HTeVOLVER server")
-
-    def _override(self, override_commands: dict):
-        """Override the robotics status on the server.
-
-        Requests server to override robotics namespace state, routine, and configuration.
+    def _enable_dispenseheads(self, dispense_head_list: list[str] = []):
+        """Request the server to enable DispenseHeads using their fluid_type name. Empty list enables all DispenseHeads
 
         Args:
-            override_commands (dict): Dictionary of status values to override.
-                Keys should match attributes in the RoboticsServerNamespace class.
+            dispense_head_list (list[str], optional): List of fluid type DispenseHeads to enable. Defaults to an empty list.
+
         """
-        self.emit("override", override_commands)
-        logger.info(f"Overriding robotics namespace state on HTeVOLVER server with: {override_commands}")
+        self.emit("on_enable_heads", dispense_head_list)
+        logger.info(f"Enabling DispenseHeads {dispense_head_list} on HTeVOLVER")
+
+    def _disable_dispenseheads(self, dispense_head_list: list[str] = []):
+        """Request the server to disable DispenseHeads using their fluid_type name. Empty list disables all DispenseHeads
+
+        Args:
+            dispense_head_list (list[str], optional): List of fluid type DispenseHeads to disable. Defaults to an empty list.
+
+        """
+        self.emit("on_disable_heads", dispense_head_list)
+        logger.info(f"Disabling DispenseHeads {dispense_head_list} on HTeVOLVER")
+
+    def _override(self, override_parameter: str, override_data: dict | int):
+        """Requests server to override robotics namespace state, routine, and configuration.
+
+        Args:
+            override_parameter (str): The robotics namespace parameter to override.
+            override_data (dict | int): Desired data to override target robotics namespace parameter.
+        """
+        valid_parameters: list[str] = ["state", "routine", "config"]
+        logger.info("Received request to override robotics namespace status/config.")
+        if override_parameter not in valid_parameters:
+            logger.error(f"Aborting override, invalid parameter entered: {override_parameter}")
+            raise ClientError(f"Aborting override, invalid parameter entered: {override_parameter}")
+
+        if override_parameter == "state":
+            try:
+                RoboticsState(override_data)
+            except ValueError:
+                logger.error(f"Aborting override, invalid state entered: {override_data}")
+
+        if override_parameter == "routine":
+            try:
+                RoboticsRoutines(override_data)
+            except ValueError:
+                logger.error(f"Aborting override, invalid routine entered: {override_data}")
+
+        self.emit("override", {override_parameter: override_data})
+        logger.info(f"Overriding robotics namespace state on HTeVOLVER server with: {override_parameter, override_data}")
 
     def _pause(self):
-        """Pause active routines in the robotics namespace backend.
-
-        Requests the server to put the robotics namespace into a pause state. Suspends any active
-        DispenseHead and xArm operations.
-        """
+        """Pause active robotics routines by suspending active DispenseHead and xArm operations."""
         self.emit("pause_robotics")
         logger.info("Paused experiment")
 
     def _resume(self):
-        """Resumes recently paused routines in the robotics namespace backend.
-
-        Requests the server to put the robotics namespace into a resume state. Resumes paused
-        DispenseHead and xArm operations.
-        """
+        """Resumes recently paused robotics routines."""
         self.emit("resume_robotics")
         logger.info("Resumed experiment")
 
     def _stop(self):
-        """Kills active robotics routines in the robotics namespace backend.
-
-        Requests the server to put the robotics namespace into a stop state. Kills DispenseHead and xArm
-        operations and gracefully exits active robotic routines.
-        """
+        """Kills active or paused robotics routines by ending DispenseHead and xArm operations and gracefully exiting robotic routines."""
         self.emit("stop_robotics")
         logger.info("Stopped experiment")
 
@@ -203,58 +211,42 @@ class RoboticsClientNamespace(socketio.ClientNamespace):
             return False
 
     @routine_decorator
-    def _dipense(self, dipense_commands: dict[int, int]):
-        """Execute a basic dipense operation with the DispenseHead
+    def _pipette(self, pipette_commands: list[int]):
+        """Execute a basic pipette operation with currently in use DispenseHead.
 
-        Requests the server to perform a pipetting operation with the DispenseHead.
-        Puts the robotics namespace into a busy state.
+        Puts the robotics namespace into a BUSY state. Checks for negative volumes prior to sending request.
 
         Args:
-            dipense_commands (dict): Dictionary containing dipense commands.
-                Key value pairs map to DispenseHead Pump ID and dipense volume.
+            pipette_commands (list): Dictionary containing dipense commands.
         """
-        self.emit("dipense_routine", dipense_commands)
+        for volume in pipette_commands:
+            if volume < 0:
+                raise ClientError(f"Blocking pipette request, negative volume found: {volume}")
+        self.emit("dipense_routine", pipette_commands)
 
     @routine_decorator
-    def _prime_dispensehead(self, prime_commands: list[int]):
+    def _prime_dispenseheads(self, dispense_head_list: list[str]):
         """Execute a DispenseHead priming cycle
 
-        Requests the server to prime the specified syringe pumps on the DispenseHead. Function is expected to be called
-        repeatedly with experimenter input to ensure that lines are completely filled prior to running experiments.
-        Puts the robotics namespace into a busy state.
+        Puts the robotics namespace into a BUSY state.
 
          Args:
-             prime_commands (list): List containing DispenseHead Pump IDs to prime
+             prime_commands (list): List containing DispenseHeads to prime.
              volume (int): Volume to dipense during priming. Defaults to 10mL
         """
-        self.emit("prime_dispensehead", prime_commands)
+        self.emit("prime_dispenseheads", dispense_head_list)
 
     @routine_decorator
-    def _influx(self, influx_commands: dict):
-        """Execute a influx routine across SmartStation vials with the DispenseHead.
+    def _influx(self, influx_commands: dict[int, list[StationInfluxCommand]]):
+        """Process multi-fluid influx command prior to sending to server.
 
-        Requests the server to perform an influx cycle across HT-eVOLVER based on the specified target vials and influx volume
-        inputs. Coordinates xArm to move DispenseHead in a snake pattern across target SmartStations. Puts robotics namespace into
-        a busy state
+        Puts robotics namespace into a BUSY state. Serializes StationInfluxCommand objects into dictionaries prior to sending request.
 
         Args:
-            influx_commands (dict): Nested dictionary mapping:
-                - station_id -> vial_id -> fluid_type -> volume
-                Example structure: {0: {3: {"MEDIA": 100, "DRUG": 50}}}
-                This would add 100μL of MEDIA and 50μL of DRUG to vial 3 in station 0.
+            influx_commands (dict): Dictionary mapping SmartStation IDs to list of StationInfluxCommand instances
         """
-        self.emit("influx_routine", influx_commands)
+        influx_commands_dict: dict[int, list[dict]] = {}
+        for station_id, station_commands in influx_commands.items():
+            influx_commands_dict[station_id] = [asdict(station_command) for station_command in station_commands]
 
-    @routine_decorator
-    def _fill_vials(self, fill_commands: dict):
-        """Fill vials with specified fluids.
-
-        Requests the server to fill all vials within a target SmartStation with influx volume inputs. Only 1 fluid type allowed
-        per SmartStation. Similar to _influx() in how modules operate. Puts robotics namespace into
-        a busy state.
-
-        Args:
-            fill_commands (dict): Dictionary mapping station IDs to tuples of (fluid_type, volume_μL).
-                This applies the same fluid and volume to ALL vials in the specified stations.
-        """
-        self.emit("fill_vials_routine", fill_commands)
+        self.emit("influx_routine", influx_commands_dict)

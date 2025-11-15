@@ -3,7 +3,59 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from htevolver.exceptions import PacketBuilderError
+from htevolver.exceptions import PacketBuilderError, StationInfluxCommandError
+
+
+@dataclass
+class StationInfluxCommand:
+    """Container for fluid influx commands for vials in a SmartStation.
+
+    Attributes:
+        fluid_type (str): The type of fluid to be dispensed.
+        station_id (int): The ID of the SmartStation.
+        vial_0 ... vial_17 (int): Influx volumes for each vial.
+    """
+
+    fluid_type: str = field(default="blank")
+    station_id: int = field(default=-1)
+    vial_0: int = field(default=0)
+    vial_1: int = field(default=0)
+    vial_2: int = field(default=0)
+    vial_3: int = field(default=0)
+    vial_4: int = field(default=0)
+    vial_5: int = field(default=0)
+    vial_6: int = field(default=0)
+    vial_7: int = field(default=0)
+    vial_8: int = field(default=0)
+    vial_9: int = field(default=0)
+    vial_10: int = field(default=0)
+    vial_11: int = field(default=0)
+    vial_12: int = field(default=0)
+    vial_13: int = field(default=0)
+    vial_14: int = field(default=0)
+    vial_15: int = field(default=0)
+    vial_16: int = field(default=0)
+    vial_17: int = field(default=0)
+
+    def __post_init__(self):
+        for vial_id in range(18):
+            volume = getattr(self, f"vial_{vial_id}")
+            if volume < 0:
+                raise StationInfluxCommandError(
+                    f"Negative volume error when creating StationInfluxCommand: vial_{vial_id}={volume}"
+                )
+
+    @classmethod
+    def uniform_influx(cls, fluid_type: str, station_id: int, volume: int) -> "StationInfluxCommand":
+        """Create a StationInfluxCommand for uniform volumes across all vials"""
+        vial_volumes: dict[str, int] = {f"vial_{vial_id}": volume for vial_id in range(18)}
+        return cls(fluid_type=fluid_type, station_id=station_id, **vial_volumes)
+
+    def get_vial_volume(self, vial_id: int) -> int:
+        """Return the influx volume for a given vial."""
+        if not (0 <= vial_id <= 17):
+            raise ValueError("vial_id must be between 0 and 17")
+        return getattr(self, f"vial_{vial_id}")
 
 
 class ServerResultCodes(Enum):
@@ -24,29 +76,16 @@ class RoboticsState(Enum):
     EMERGENCY_STOP = 6
 
 
-class ReferencePositions(Enum):
-    STANDBY = 0
-    HOME = 1
-    STATION_0 = 2
-    STATION_1 = 3
-    STATION_2 = 4
-    STATION_3 = 5
-    TOOL_CHANGE_0 = 6
-    TOOL_CHANGE_1 = 7
-    TOOL_CHANGE_2 = 8
-
-
 class RoboticsRoutines(Enum):
     NO_ROUTINE = 0
     INFLUX = 1
     PIPETTE = 2
-    FILLING_VIALS = 3
-    PRIMING_INFLUX = 4
-    PRIMING_EFFLUX = 5
-    INITIALIZE = 6
-    HOME = 7
-    STANDBY = 8
-    TOOL_CHANGE = 9
+    PRIMING_INFLUX = 3
+    PRIMING_EFFLUX = 4
+    INITIALIZE = 5
+    HOME = 6
+    STANDBY = 7
+    TOOL_CHANGE = 8
 
 
 class CommandTags(Enum):

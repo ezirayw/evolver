@@ -65,7 +65,7 @@ class DispenseHeadProtocol(Protocol):
         """Prime pumps on DispenseHead"""
         ...
 
-    def aspirate(self, aspirate_commands: list[int]) -> None:
+    async def aspirate(self, aspirate_commands: list[int]) -> None:
         """Execute aspiration commands on the DispenseHead.
 
         Args:

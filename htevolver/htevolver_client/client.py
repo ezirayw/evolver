@@ -7,7 +7,7 @@ import socketio
 from htevolver.exceptions import ClientError
 from htevolver.htevolver_client.evolver_namespace_client import EvolverClientNamespace
 from htevolver.htevolver_client.robotics_namespace_client import RoboticsClientNamespace
-from htevolver.shared import HTEvolverStatus, RoboticsRoutines, RoboticsState
+from htevolver.shared import HTEvolverStatus, StationInfluxCommand
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class HTEvolverClient:
         self.robotics._request_robotics_status()
         self.robotics._request_robotics_config()
         self.robotics._connect_xArm()
-        self.robotics._enable_influx()
+        self.robotics._enable_dispenseheads()
 
     def disconnect(self) -> None:
         """Disconnect from HTeVOLVER.
@@ -102,7 +102,7 @@ class HTEvolverClient:
             >>> # Connection is now closed
         """
         self.robotics._disconnect_xArm()
-        self.robotics._disable_influx()
+        self.robotics._disable_dispenseheads()
         self.sio.disconnect()
         logger.info("Disconnected from the HTeVOLVER server")
 
@@ -114,7 +114,6 @@ class HTEvolverClient:
 
         Args:
             override_parameter (str): The robotics namespace parameter to override.
-                Must be a valid override parameter (e.g., "state", "config").
             override_data (dict | int): Desired data to override target robotics namespace parameter.
 
         Raises:
@@ -126,26 +125,7 @@ class HTEvolverClient:
             >>> # Override configuration parameters
             >>> client.override("config", {"dipense_speed": 10})
         """
-
-        valid_parameters: list[str] = ["state", "routine", "config"]
-        logger.info("Received request to override robotics namespace status/config.")
-        if override_parameter not in valid_parameters:
-            logger.error(f"Aborting override, invalid parameter entered: {override_parameter}")
-            raise ClientError(f"Aborting override, invalid parameter entered: {override_parameter}")
-
-        if override_parameter == "state":
-            try:
-                RoboticsState(override_data)
-            except ValueError:
-                logger.error(f"Aborting override, invalid state entered: {override_data}")
-
-        if override_parameter == "routine":
-            try:
-                RoboticsRoutines(override_data)
-            except ValueError:
-                logger.error(f"Aborting override, invalid routine entered: {override_data}")
-
-        self.robotics._override({override_parameter: override_data})
+        self.robotics._override(override_parameter, override_data)
         logger.info(f"Sent override command for parameter: {override_parameter} with data: {override_data}")
 
     def set_calibration(self, station_id: int, calibration_parameter: str, filename: str = ""):
@@ -393,96 +373,58 @@ class HTEvolverClient:
         else:
             return self.robotics.server_config
 
-    def dipense(self, dipense_commands: dict[int, int]):
-        """Execute a pipetting operation.
-
-        Sends a dipense command to the robotics system to aspirate and dispense
-        fluids with the specified volumes.
+    def pipette(self, pipette_commands: list[int]):
+        """Execute a pipette operation with currently in use DispenseHead.
 
         Args:
-            dipense_commands (dict): Map dipense volumes (in μL) to DispenseHead Pump ID keys.
+            pipette_commands (list): List of volumes (uL) to pipette, with index of volume mapping to syringe pump position on DispenseHead.
 
         Examples:
-            >>> # Dispense 100μL from pump 0 and 200μL from pump 2
-            >>> client.dipense({0:100, 2:200})
+            >>> # Dispense 100μL from pump 0, 200μL from pump 1, and 1000uL for pump 2
+            >>> client.dipense([100, 200, 1000])
         """
-        logger.info(f"HT-eVOLVER client sending the following DispenseHead pipettte command: {dipense_commands}")
-        self.robotics._dipense(dipense_commands)
+        try:
+            self.robotics._pipette(pipette_commands)
+            logger.info(f"HT-eVOLVER client sending the following DispenseHead pipettte command: {pipette_commands}")
+        except ClientError:
+            logger.warning("Exiting pipette request...")
 
-    def prime_dipensehead(self, prime_commands: list[int]):
-        """Prime the specified syringe pumps.
+    def prime_dispenseheads(self, dispense_head_list: list[str] = []):
+        """Prime the specified DispenseHeads by their fluid_type name or leave empty to prime all DispenseHeads.
 
-        Sends a command to prime the specified syringe pumps. Priming fills the tubing for influx usage. For each syringe pump
-        specified, priming cycle will dipense set volume for all configured ports to fill tubing lines. Required prior to running
-        influx operations.
+        Priming fills the tubing between all syringe pump ports and fluid reservoirs for speccified DispenseHeads.
+        Required prior to running influx/pipette operations.
 
         Args:
-            prime_commands (list): List of DispenseHead Pump IDs to prime.
-                Example: [0, 1] to prime pumps 0 and 1.
+            prime_commands (list): List of fluid types to prime, which correspond to DispenseHeads. Defaults to an empty list.
 
         Examples:
             >>> # Prime pumps 0 and 1
             >>> client.prime_dipensehead([0, 1])
         """
-        logger.info(f"HT-eVOLVER client sending the following DispenseHead prime command: {prime_commands}")
-        self.robotics._prime_dipensehead(prime_commands)
+        logger.info(f"HT-eVOLVER client sending the following DispenseHead prime command: {dispense_head_list}")
+        self.robotics._prime_dispenseheads(dispense_head_list)
 
-    def influx(self, influx_commands: dict):
-        """Execute influx in specific vials across SmartStations.
-
-        Sends a influx command to the robotics system to dipense target fluids into specified SmartStation vials.
-        Vials can receive influx inputs from any configured DispenseHead syringe pump. Influx volume inputs cannot
-        exceed the physical capacity of the syringe pump.
+    def influx(self, influx_commands: dict[int, list[StationInfluxCommand]]):
+        """Execute multi-fluid influx into specific vials across SmartStations for vial dilutions and filling vials prior to experiments.
 
         Args:
-            influx_commands (dict): Nested dictionary mapping influx volumes to SmartStation IDs & vial IDs
-                to fluid types to volumes. Structure: {station_id: {vial_id: {"FLUID_TYPE": volume}}}.
-                Example: {0: {3: {"MEDIA": 100, "DRUG": 50}}} adds 100μL of MEDIA and 50μL of DRUG
-                to vial 3 in station 0.
+            influx_commands (dict): Dictionary mapping SmartStation IDs to lists of StationInfluxCommand objects.
 
         Examples:
-            >>> # Add fluids to multiple vials across stations
-            >>> client.influx({
-            ...     0: {  # Station 0
-            ...         3: {"MEDIA": 100, "DRUG": 50},  # Vial 3 gets MEDIA and DRUG
-            ...         4: {"MEDIA": 150}  # Vial 4 gets only MEDIA
-            ...     }
-            ... })
+            >>> # Add media and drug  to multiple vials across stations
+            >>> client.influx(            {
+                0: [StationInfluxComand(fluid_type="media", station_id=0), StationInfluxComand(fluid_type="drug", station_id=0)],
+                1: [StationInfluxComand(fluid_type="media", station_id=1), StationInfluxComand(fluid_type="drug", station_id=1)],
+                2: [StationInfluxComand(fluid_type="media", station_id=2), StationInfluxComand(fluid_type="drug", station_id=2)],
+                3: [StationInfluxComand(fluid_type="media", station_id=3), StationInfluxComand(fluid_type="drug", station_id=3)]
+            })
         """
         logger.info(f"HT-eVOLVER client sending the following influxs command: {influx_commands}")
         self.robotics._influx(influx_commands)
 
-    def influx_ipp(self, influx_commands: dict[int, int]):
-        """Execute influx using millifluidic boards for target SmartStations.
-
-        Sends a influx-oriented IPP command to target SmartStations by operating IPPs in reverse. Enables rapid
-        filling of SmartStation vials for experiment setup. Requires desired fluid source to be connected to millifluidic
-        waste port(s), so not as flexible as using influx() in terms of fluid source multiplexing. Volume cannot exceed
-        maximum vial culture capacity of 6mL.
-
-        Args:
-            influx_commands (dict): Dictionary mapping SmartStation IDs to desired influx volume (uL).
-
-        Examples:
-        >>> # Add 1000uL into all vials in SmartStation:0 and 500uL into all vials in SmartStation:3
-            >>> client.efflux({0: 1000, 3: 500})
-        """
-        for station_id, volume in influx_commands.items():
-            if volume > 6000:
-                logger.error(
-                    f"Aborting influx_ipp, volume greater than vial capacity detected for SmartStation {station_id}: {volume}"
-                )
-                raise ClientError(
-                    f"Aborting influx_ipp, volume greater than vial capacity detected for SmartStation {station_id}: {volume}"
-                )
-        logger.info(f"HT-eVOLVER client sending the following influxs command: {influx_commands}")
-        self.evolver._run_ipps(influx_commands)
-
     def efflux(self, efflux_commands: dict[int, int]):
-        """Execute efflux for target SmartStations
-
-        Sends an IPP command to target SmartStations to run efflux. Efflux volume is the same across all vials for the specified
-        SmartStation.
+        """Execute efflux for specificed SmartStations. Efflux volume is uniform across all vials within a SmartStation
 
         Args:
             efflux_commands (dict): Dictionary mapping SmartStation IDs to desired efflux volume (uL).
@@ -491,11 +433,7 @@ class HTEvolverClient:
             >>> # Remove 1000uL from all vials in SmartStation:0 and 500uL from all vials in SmartStation:3
             >>> client.efflux({0: 1000, 3: 500})
         """
-        for station_id, volume in efflux_commands.items():
-            if volume < 0:
-                logger.error(f"Aborting efflux, negative volume detected for SmartStation {station_id}: {volume}")
-                raise ClientError(f"Aborting efflux, negative volume detected for SmartStation {station_id}: {volume}")
-        self.evolver._run_ipps(efflux_commands)
+        self.evolver._run_efflux(efflux_commands)
 
     def pause(self):
         """Pause active robotic routines on HT-eVOLVER.

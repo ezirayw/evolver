@@ -5,6 +5,7 @@ import numpy as np
 import skimage as ski
 from skimage.transform import EuclideanTransform
 
+from htevolver.exceptions import SmartStationError
 from htevolver.robotics.xarm import xArmCoordinate
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def dict_factory_smartstation(data):
 
 
 @dataclass
-class VialCoordinate:
+class StationCoordinate:
     """Represents a coordinate in the vial grid system.
 
     Stores 2D coordinates (x, y) for identifying positions in the vial system's
@@ -108,22 +109,22 @@ class xArmPlane:
         tform.estimate(vial_coordinates, np.array([vial_0, vial_17]))
         self.transform_matrix = tform
 
-    def vial_to_xarm(self, evolver_coordinates: VialCoordinate) -> xArmCoordinate:
+    def vial_to_xarm(self, evolver_coordinates: StationCoordinate) -> xArmCoordinate:
         """Transform vial coordinates to xArm coordinates.
 
         Applies the rigid transformation matrix to convert from the evolver
         coordinate system to the xArm coordinate system.
 
         Args:
-            evolver_coordinates (VialCoordinate): Coordinates in the evolver system.
-                Example: VialCoordinate(x=18, y=36)
+            evolver_coordinates (StationCoordinate): Coordinates in the evolver system.
+                Example: StationCoordinate(x=18, y=36)
 
         Returns:
             xArmCoordinate: The transformed coordinates in the xArm system.
 
         Examples:
             ```
-            vial_pos = VialCoordinate(x=18, y=36)
+            vial_pos = StationCoordinate(x=18, y=36)
             arm_pos = plane.vial_to_xarm(vial_pos)
             print(f"xArm position: ({arm_pos.x}, {arm_pos.y}, {arm_pos.z})")
             ```
@@ -133,33 +134,27 @@ class xArmPlane:
         return xArmCoordinate(x=transformed[0][0], y=transformed[1][0], z=self.z)
 
 
-@dataclass
 class SmartStationRobotics:
-    """Represents a SmartStation with transformation capabilities for robotics.
-
-    Manages the coordinate transformations between the vial grid system and the
-    xArm coordinate system for both in-vial and above-vial planes.
+    """Class representing SmartStations on for HT-eVOLVER. Contains coordinate transformation data to facilitate xArm traversal along SmartStation.
 
     Attributes:
         xArmPlane_in (xArmPlane): Transformation plane for in-vial positions.
         xArmPlane_out (xArmPlane): Transformation plane for above-vial positions.
-        wash_location (VialCoordinate): Location of the wash station in vial coordinates.
-        wash_depth (float): Depth for washing operations.
+        vial_map (list[list[int]]): Representation of how vials are organized on SmartStation
     """
 
-    xArmPlane_in: xArmPlane
-    xArmPlane_out: xArmPlane
-    wash_location: VialCoordinate
-    wash_depth: float
+    vial_map: list[list[int]] = [[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 11], [12, 13, 14, 15, 16, 17]]
+
+    def __init__(self, xArmPlane_in: xArmPlane, xArmPlane_out: xArmPlane):
+        self.xArmPlane_in: xArmPlane = xArmPlane_in
+        self.xArmPlane_out: xArmPlane = xArmPlane_out
 
     @classmethod
-    def create(cls, config: dict):
+    def from_config(cls, station_config: dict) -> "SmartStationRobotics":
         """Create a new SmartStationRobotics instance.
 
         Args:
             config (dict): Configuration dictionary for the SmartStation.
-                Must include 'plane_in' and 'plane_out' sections for the transformation planes.
-                Should include 'wash_location' and 'wash_depth'.
 
         Returns:
             SmartStationRobotics: A new instance of SmartStationRobotics.
@@ -176,24 +171,22 @@ class SmartStationRobotics:
                     "vial0_x": 150.5, "vial0_y": 200.3,
                     "vial17_x": 240.7, "vial17_y": 170.4,
                     "z": 50.0
-                },
-                "wash_location": {"x": 72, "y": -29},
-                "wash_depth": 20.0
+                }
             }
-            station = SmartStationRobotics.create(config)
+            station = SmartStationRobotics.from_config(config)
             ```
         """
-        plane_in = xArmPlane(**config["plane_in"])
-        plane_out = xArmPlane(**config["plane_out"])
-        plane_in.rigid_transform()
-        plane_out.rigid_transform()
-        wash_location_x = config["wash_location"].get("x", 72)
-        wash_location_y = config["wash_location"].get("y", -29)
+        try:
+            plane_in = xArmPlane(**station_config["plane_in"])
+            plane_out = xArmPlane(**station_config["plane_out"])
+            plane_in.rigid_transform()
+            plane_out.rigid_transform()
+        except KeyError:
+            raise SmartStationError("Error trying to create SmartStationRobotics, incomplete config.")
+
         return cls(
             xArmPlane_in=plane_in,
             xArmPlane_out=plane_out,
-            wash_location=VialCoordinate(x=wash_location_x, y=wash_location_y),
-            wash_depth=config.get("wash_depth", 0),
         )
 
     def update(self, station_config: dict):
@@ -223,4 +216,4 @@ class SmartStationRobotics:
             dict: Dictionary containing the current state and configuration.
                 Uses dict_factory_smartstation to handle special types like EuclideanTransform.
         """
-        return asdict(self, dict_factory=dict_factory_smartstation)
+        return {"plane_out": asdict(self.xArmPlane_out), "plane_in": asdict(self.xArmPlane_in)}
