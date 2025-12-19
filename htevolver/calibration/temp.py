@@ -30,8 +30,8 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 from htevolver.calibration.calibration_cli import get_calibration_options
-from htevolver.htevolver_client.client import HTEvolverClient
-from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
+from htevolver.client.client import HTEvolverClient
+from htevolver.client.data_analysis import CalibrationData, GraphCalibration
 
 # Constants
 MEASURE_VIALS = [0, 5, 8, 9, 12, 17]
@@ -41,7 +41,7 @@ STANDARD_NUM_MIN = 3
 LOGGING_DIR: str = "/home/pi/logs"
 
 # Configure client logger (logs to file)
-client_logger = logging.getLogger("htevolver.htevolver_client")
+client_logger = logging.getLogger("htevolver.client")
 calibration_logger = logging.getLogger("htevolver.calibration")
 
 # Configure calibration logger (logs to console)
@@ -108,9 +108,7 @@ def collect_temperature_measurements(station_list: list[int]):
     return temperature_measurements
 
 
-def collect_temp_data(
-    htevolver_client: HTEvolverClient, station_list: list[int], num_standards: int
-) -> dict[str, CalibrationData]:
+def collect_temp_data(client: HTEvolverClient, station_list: list[int], num_standards: int) -> dict[str, CalibrationData]:
     """Collect temperature calibration data for specified stations.
 
     Guides the user through the temperature calibration procedure, which includes:
@@ -119,7 +117,7 @@ def collect_temp_data(
     3. Collecting voltage readings and temperature measurements at each setpoint
 
     Args:
-        htevolver_client (HTEvolverClient): Client connected to the HT-eVOLVER system.
+        client (HTEvolverClient): Client connected to the HT-eVOLVER system.
         station_list (list[int]): List of station IDs to calibrate.
         num_standards (int): Number of temperature points to use above and below room temperature.
 
@@ -159,7 +157,7 @@ def collect_temp_data(
     # Room temperature step
     room_temp_step_num = int(np.ceil(num_standards / 2))
     logger.info("Collecting room temperature voltage readings, do not move vials or exit. Should take about a minute...")
-    voltage_triplets = htevolver_client.get_new_temp(station_list)
+    voltage_triplets = client.get_new_temp(station_list)
     logger.info("Done collecting room temperature voltage readings. Prepare to take temperature readings from vials.")
     temperature_measurements = collect_temperature_measurements(station_list)
 
@@ -170,9 +168,7 @@ def collect_temp_data(
         calibration_data[station_key].standard_deviation[room_temp_step_num] = np.std(voltage_triplets[station_id], dtype=float)
         calibration_data[station_key].standards[room_temp_step_num] = np.mean(temperature_measurements[station_id])
 
-    CalibrationData.save_calibration(
-        calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
-    )
+    CalibrationData.save_calibration(calibration_data, client.evolver.evolver_conf["calibration_cache_directory"], "temp")
 
     logger.info("Auto-calculating calibration setpoints based on number of temperature standards inputs.")
     for station_id in station_list:
@@ -212,7 +208,7 @@ def collect_temp_data(
         for station_id in station_list:
             temp_commands[station_id] = calibration_data[f"station_{station_id}"].settings["setpoints"][step_num]
         logger.info(f"Sending setpoints: {temp_commands} to HT-eVOLVER...")
-        htevolver_client.evolver.send_command("temp", temp_commands, immediate=True, recurring=True)
+        client.evolver.send_command("temp", temp_commands, immediate=True, recurring=True)
 
         # Wait for equilibration
         logger.info("Wait for 30-60 mins to allow for heat equilibration...")
@@ -221,7 +217,7 @@ def collect_temp_data(
             continue
 
         logger.info(f"Temperature readings voltage readings starting for {step_num}, do not move vials or exit...")
-        voltage_triplets = htevolver_client.get_new_temp(station_list)
+        voltage_triplets = client.get_new_temp(station_list)
 
         logger.info("Done collecting room temperature voltage readings. Prepare to take temperature readings from vials.")
         temperature_measurements = collect_temperature_measurements(station_list)
@@ -235,9 +231,7 @@ def collect_temp_data(
             calibration_data[station_key].standards[step_num] = np.mean(temperature_measurements[station_id])
             calibration_data[station_key].step_num = step_num
 
-    CalibrationData.save_calibration(
-        calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "temp"
-    )
+    CalibrationData.save_calibration(calibration_data, client.evolver.evolver_conf["calibration_cache_directory"], "temp")
 
     for station_id in station_list:
         calibration_data[f"station_{station_id}"].complete = True
@@ -302,17 +296,17 @@ if __name__ == "__main__":
 
     station_list = options.stations if options.stations else [0, 1, 2, 3]
 
-    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
+    client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
 
     # Start data collection procedure
-    collected_calibration_data = collect_temp_data(htevolver_client, station_list, int(options.standard_number))
+    collected_calibration_data = collect_temp_data(client, station_list, int(options.standard_number))
     final_calibration_data = fit_data(collected_calibration_data, True)
 
     for station_key in final_calibration_data:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         serialized_calibration_data = CalibrationData.to_json({station_key: final_calibration_data[station_key]})
-        htevolver_client.evolver.send_calibration(
+        client.evolver.send_calibration(
             serialized_calibration_data, metadata={"parameter": "temp", "timestamp": timestamp, "station_key": station_key}
         )
 
-    htevolver_client.disconnect()
+    client.disconnect()

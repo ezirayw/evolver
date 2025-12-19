@@ -1,29 +1,13 @@
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 
 from xarm.wrapper import XArmAPI
 
+from htevolver.dependencies import CartesianMovement
 from htevolver.exceptions import xArmError
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class xArmCoordinate:
-    """Represents an xArm coordinate in 3D space.
-
-    Stores 3D coordinates (x, y, z) for identifying positions in the xArm's
-    coordinate system.
-
-    Attributes:
-        x (float): The x-coordinate value in the xArm system.
-        y (float): The y-coordinate value in the xArm system.
-        z (float): The z-coordinate value (height) in the xArm system.
-    """
-
-    x: float
-    y: float
-    z: float
 
 
 @dataclass
@@ -35,13 +19,10 @@ class xArm:
 
     Attributes:
         arm_api (XArmAPI): API interface to the physical xArm.
-        ip (str): IP address of the xArm controller.
         connected (bool): Connection status of the arm.
-        roll (int): Roll angle for the end effector in degrees.
-        pitch (int): Pitch angle for the end effector in degrees.
-        yaw (int): Yaw angle for the end effector in degrees.
-        speed (int): Movement speed (1-1000).
-        mvacc (int): Movement acceleration (1-1000).
+        ip (str): IP address of the xArm controller.
+        home_position (CartesianMovement): Home position for xArm.
+        standby_position (CartesianMovement): Standby position for xArm.
         warning_code (int): Current warning code from the arm, if any.
         error_code (int): Current error code from the arm, if any.
         state (int): Current state of the arm (0=READY, 3=PAUSE, 4=STOP).
@@ -50,14 +31,11 @@ class xArm:
     """
 
     arm_api: XArmAPI = field(repr=False)
-    ip: str
     connected: bool
-    roll: int
-    pitch: int
-    yaw: int
-    speed: int
-    mvacc: int
-    reference_positions: dict[str, xArmCoordinate]
+    ip: str
+    home_position: CartesianMovement
+    standby_position: CartesianMovement
+
     warning_code: int = field(default=0)
     error_code: int = field(default=0)
     state: int = field(default=0)
@@ -76,22 +54,15 @@ class xArm:
             xArm: A new instance of the xArm controller.
         """
         try:
-            reference_positions: dict[str, xArmCoordinate] = {}
-            for position, coordinate in config.get("reference_positions", {}).items():
-                reference_positions[position] = xArmCoordinate(**coordinate)
             return cls(
-                arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=not config["enabled"]),
-                ip=config["ip"],
+                arm_api=XArmAPI(port=config["ip"], enable_report=True, do_not_open=True),
                 connected=config.get("connect", False),
-                roll=config["roll"],
-                pitch=config["pitch"],
-                yaw=config["yaw"],
-                speed=config["speed"],
-                mvacc=config["mvacc"],
-                reference_positions=reference_positions,
+                ip=config["ip"],
+                home_position=CartesianMovement(**config["home"]),
+                standby_position=CartesianMovement(**config["standby"]),
             )
-        except Exception as e:
-            raise xArmError("Error trying to create xArm wrapper instance") from e
+        except Exception:
+            raise xArmError("Error trying to create xArm")
 
     def initialize(self):
         """Setup the xArm with standard parameters.
@@ -122,13 +93,13 @@ class xArm:
         """Disconnect from the xArm robot via the xArm API."""
         self.arm_api.disconnect()
 
-    def update(self, xarm_config: dict):
+    def update(self, config: dict):
         """Update xArm configuration from a dictionary.
 
         Args:
-            xarm_config (dict): Dictionary containing updated configuration parameters.
+            config (dict): Dictionary containing updated configuration.
         """
-        for config_parameter, value in xarm_config["xArm"].items():
+        for config_parameter, value in config["xArm"].items():
             if hasattr(self, config_parameter) and getattr(self, config_parameter) != value:
                 setattr(self, config_parameter, value)
                 logger.debug(f"Updated xArm parameter: {config_parameter}={value}")
@@ -172,41 +143,43 @@ class xArm:
         if result[0] == 0:
             return result[1]
 
-    def move(self, coordinate: xArmCoordinate):
+    def move(self, config: CartesianMovement):
         """Move the xArm linearly to the specified coordinate.
 
         Executes an immediate linear movement from the current position
         to the given target position, using the configured orientation angles.
 
         Args:
-            coordinate (xArmCoordinate): Target coordinates for the movement.
-                Example: xArmCoordinate(x=150, y=100, z=50)
+            coordinate (CartesianMovement): Target coordinates for the movement.
+                Example: CartesianMovement(x=150, y=100, z=50)
 
         Raises:
             xArmError: If the movement fails, speed/acceleration exceeds limits,
                 or the arm is in an error state.
         """
 
-        if self.speed > self.max_speed:
-            raise xArmError(f"Configured xArm speed parameter: {self.speed} higher than max allowed speed: {self.max_speed}")
-        if self.mvacc > self.max_mvacc:
-            raise xArmError(f"Configured xArm mvacc parameter: {self.mvacc} higher than max allowed mvacc: {self.max_mvacc}")
+        if config.speed > self.max_speed:
+            raise xArmError(f"Configured xArm speed parameter: {config.speed} higher than max allowed speed: {self.max_speed}")
+        if config.acceleration > self.max_mvacc:
+            raise xArmError(
+                f"Configured xArm mvacc parameter: {config.acceleration} higher than max allowed mvacc: {self.max_mvacc}"
+            )
 
         result = self.arm_api.set_position(
-            x=coordinate.x,
-            y=coordinate.y,
-            z=coordinate.z,
-            roll=self.roll,
-            pitch=self.pitch,
-            yaw=self.yaw,
-            speed=self.speed,
-            mvacc=self.mvacc,
+            x=config.x,
+            y=config.y,
+            z=config.z,
+            roll=config.roll,
+            pitch=config.pitch,
+            yaw=config.yaw,
+            speed=config.speed,
+            mvacc=config.acceleration,
             wait=True,
         )
         if result < 0:
             raise xArmError(f"xArm error detected during move_xarm(): {result}")
 
-    def check_position(self, reference_position: str) -> bool:
+    def check_position(self, position: Literal["home", "standby"]) -> bool:
         """Check if the xArm is currently within 1% of the specified reference position.
 
         Args:
@@ -215,27 +188,25 @@ class xArm:
         Returns:
             bool: True if the xArm is at the reference position, False otherwise.
         """
-        if reference_position not in self.reference_positions.keys():
-            raise xArmError(f"Input reference position invalid: {reference_position}")
-        code, current_location = self.arm_api.get_position()
-        precision: float = 0.1
-        lower_threshold: float = 1 - precision
-        upper_threshold: float = 1 + precision
+        # code, current_location = self.arm_api.get_position()
+        # precision: float = 0.1
+        # lower_threshold: float = 1 - precision
+        # upper_threshold: float = 1 + precision
 
-        if (current_location[0] < self.reference_positions[reference_position].x * lower_threshold) or (
-            current_location[0] > self.reference_positions[reference_position].x * upper_threshold
-        ):
-            return False
+        # if (current_location[0] < self.reference_positions[reference_position].x * lower_threshold) or (
+        #     current_location[0] > self.reference_positions[reference_position].x * upper_threshold
+        # ):
+        #     return False
 
-        if (current_location[1] < self.reference_positions[reference_position].y * lower_threshold) or (
-            current_location[1] > self.reference_positions[reference_position].y * upper_threshold
-        ):
-            return False
+        # if (current_location[1] < self.reference_positions[reference_position].y * lower_threshold) or (
+        #     current_location[1] > self.reference_positions[reference_position].y * upper_threshold
+        # ):
+        #     return False
 
-        if (current_location[2] < self.reference_positions[reference_position].z * lower_threshold) or (
-            current_location[2] > self.reference_positions[reference_position].z * upper_threshold
-        ):
-            return False
+        # if (current_location[2] < self.reference_positions[reference_position].z * lower_threshold) or (
+        #     current_location[2] > self.reference_positions[reference_position].z * upper_threshold
+        # ):
+        #     return False
         return True
 
     def register_callback(self, error_warn_callback, state_changed_callback, connect_changed_callback):
@@ -266,11 +237,6 @@ class xArm:
         """
         return {
             "ip": self.ip,
-            "roll": self.roll,
-            "pitch": self.pitch,
-            "yaw": self.yaw,
-            "speed": self.speed,
-            "mvacc": self.mvacc,
             "warning_code": self.warning_code,
             "error_code": self.error_code,
             "state": self.state,

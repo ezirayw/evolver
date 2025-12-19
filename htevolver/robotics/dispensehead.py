@@ -1,13 +1,16 @@
 import logging
+import time
 from dataclasses import asdict, dataclass, field, fields
 from typing import Callable
 
 from tecancavro.models import XCaliburD
 from tecancavro.syringe import SyringeError, SyringeTimeout
+from tecancavro.tecanapi import TecanAPIInvalidAddress, TecanAPIInvalidFrame, TecanAPITimeout
 from tecancavro.transport import UFactoryAPISerial
 from xarm.wrapper import XArmAPI
 
-from htevolver.exceptions import DispenseHeadError, DispenseHeadWarning
+from htevolver.exceptions import DispenseHeadError
+from htevolver.robotics.interfaces import DispenseHeadProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -142,60 +145,73 @@ def pump_action(func: Callable):
         ```
     """
 
-    def wrapper(self: DispenseHeadXCaliburD, *args, **kwargs):
-        if self.in_use:
-            try:
-                if not DispenseHeadXCaliburD.communication_interface:
-                    raise (DispenseHeadError("UFactoryAPISerial interface not yet setup for XCaliburD pumps"))
-
-                func(self, *args, **kwargs)
-            except (SyringeError, SyringeTimeout):
-                raise DispenseHeadError(f"Error trying to run {func.__name__} on {self.head_id}_DispenseHead")
-        else:
+    def wrapper(self: "DispenseHeadXCaliburD", *args, **kwargs):
+        if not self.active:
             raise DispenseHeadError(f"{self.head_id}_DispenseHead cannot run {func.__name__}, not in use.")
-
-    return wrapper
-
-
-def pump_action_class(func: Callable):
-    """Decorator for pump actions that require connection verification/error handling. Used when running controlling all XCaliburD pumps
-
-    Args:
-        func (callable): The helper function to decorate.
-
-    Returns:
-        callable: The wrapped function which handles connection verification and errors.
-
-    Raises:
-        DispenseHeadError: If the pump is not connected or encounters an error.
-
-    Examples:
-        ```
-        @pump_action
-        def aspirate(self, volume):
-            # Function implementation
-        ```
-    """
-
-    def wrapper(cls: DispenseHeadXCaliburD, *args, **kwargs):
         try:
             if not DispenseHeadXCaliburD.communication_interface:
                 raise (DispenseHeadError("UFactoryAPISerial interface not yet setup for XCaliburD pumps"))
 
-            func(cls, *args, **kwargs)
+            func(self, *args, **kwargs)
         except (SyringeError, SyringeTimeout):
-            raise DispenseHeadError(f"Error trying to run {func.__name__} for XCaliburD pumps")
+            raise DispenseHeadError(f"Error trying to run {func.__name__} on {self.head_id}_DispenseHead")
 
     return wrapper
 
 
-class DispenseHeadXCaliburD:
+class DummyDispenseHead(DispenseHeadProtocol):
+    head_id: int = 0
+    active: bool = False
+    enabled: bool = False
+    pump_number: int = 0
+
+    @classmethod
+    def from_config(cls, head_config: dict) -> "DummyDispenseHead":
+        logger.info(f"DummyDispenseHead.from_config called with: {head_config}")
+        return cls()
+
+    def enable(self) -> None:
+        logger.info("DummyDispenseHead.enable called")
+
+    def disable(self) -> None:
+        logger.info("DummyDispenseHead.disable_head called")
+
+    def initialize(self) -> None:
+        logger.info("DummyDispenseHead.initialize_head called")
+
+    def update(self, dispensehead_config: dict) -> None:
+        logger.info(f"DummyDispenseHead.update_head called with: {dispensehead_config}")
+
+    def pause(self) -> None:
+        logger.info("DummyDispenseHead.pause called")
+
+    def stop(self) -> None:
+        logger.info("DummyDispenseHead.stop called")
+
+    def resume(self) -> None:
+        logger.info("DummyDispenseHead.resume called")
+
+    def prime(self) -> None:
+        logger.info("DummyDispenseHead.prime called")
+
+    def aspirate(self, aspirate_commands: dict[str, int]) -> None:
+        logger.info(f"DummyDispenseHead.aspirate called with: {aspirate_commands}")
+
+    def dispense(self, dispense_commands: dict[str, int]) -> None:
+        logger.info(f"DummyDispenseHead.dispense called with: {dispense_commands}")
+
+    def to_dict(self) -> dict:
+        logger.info("DummyDispenseHead.to_dict called")
+        return {"dummy": True}
+
+
+class DispenseHeadXCaliburD(DispenseHeadProtocol):
     """HT-eVOLVER DispenseHead class using XCaliburD syringe pumps. Subtype of the DispenseHeadProtocol."""
 
-    base_address: int = 0x31
     address_all_pumps: int = 0x5F
     default_num_ports: int = 3
     default_syringe_ul: int = 1000
+    default_air_gap_ul: int = 20
     default_direction: str = "CW"
     default_microstep: bool = False
     default_waste_port: int = 3
@@ -206,22 +222,25 @@ class DispenseHeadXCaliburD:
     communication_interface: UFactoryAPISerial | None = None
     all_pump_interface: XCaliburD | None = None
 
-    def __init__(self, head_id: int, pump_number: int, in_use=False, enabled=False):
+    def __init__(self, head_id: int, pump_number: int, active=False, enabled=False):
         self.head_id = head_id
         self.pump_number = pump_number
-        self.pumps: dict[int, XCaliburD] = {}
-        self.ports: dict[int, dict[int, PumpPort]] = {}
-        self.in_use = in_use
+        self.pumps: dict[str, XCaliburD] = {}
+        self.ports: dict[str, dict[int, PumpPort]] = {}
+        self.active = active
         self.enabled = enabled
+        self.primed = False
         self.reservoirs: dict[int, FluidReservoir] = {
             0: FluidReservoir(fluid_type="blank", starting_volume=0, current_volume=0, threshold=0.1)
         }
 
         for pump_id in range(self.pump_number):
-            self.pumps[pump_id] = XCaliburD(
+            pump: str = f"pump_{pump_id}"
+            self.pumps[pump] = XCaliburD(
                 num_ports=DispenseHeadXCaliburD.default_num_ports,
                 com_link=DispenseHeadXCaliburD.communication_interface,
-                address=pump_id + DispenseHeadXCaliburD.base_address,
+                address=pump_id,
+                air_gap_ul=DispenseHeadXCaliburD.default_air_gap_ul,
                 syringe_ul=DispenseHeadXCaliburD.default_syringe_ul,
                 direction=DispenseHeadXCaliburD.default_direction,
                 microstep=DispenseHeadXCaliburD.default_microstep,
@@ -229,8 +248,8 @@ class DispenseHeadXCaliburD:
                 slope=DispenseHeadXCaliburD.default_slope,
                 init_force=DispenseHeadXCaliburD.default_init_force,
             )
-            for port_id in range(self.pumps[pump_id].num_ports):
-                self.ports[pump_id][port_id] = PumpPort(volume_consumed=0, reservoir_id=0, primed=False, active=False)
+            for port_id in range(self.pumps[pump].num_ports):
+                self.ports[pump][port_id] = PumpPort(volume_consumed=0, reservoir_id=0, primed=False, active=False)
 
     @classmethod
     def set_communication_interface(cls, xarm_instance: XArmAPI):
@@ -276,11 +295,12 @@ class DispenseHeadXCaliburD:
             ```
         """
         pump_number: int = 0
-        pumps: dict[int, XCaliburD] = {}
-        ports: dict[int, dict[int, PumpPort]] = {}
+        pumps: dict[str, XCaliburD] = {}
+        ports: dict[str, dict[int, PumpPort]] = {}
         reservoirs: dict[int, FluidReservoir] = {}
         for pump_id, pump_config in head_config.get("pumps", {}).items():
-            pumps[pump_number] = XCaliburD(
+            pump: str = f"pump_{pump_id}"
+            pumps[pump] = XCaliburD(
                 com_link=cls.communication_interface,
                 address=pump_id,
                 syringe_ul=pump_config.get("syringe_volume", cls.default_syringe_ul),
@@ -293,31 +313,31 @@ class DispenseHeadXCaliburD:
             )
             pump_number += 1
             for port_id, port_config in pump_config["ports"]:
-                ports[pump_id][port_id] = PumpPort.from_config(port_config)
+                ports[pump][port_id] = PumpPort.from_config(port_config)
 
         for reservoir_id, reservoir_config in head_config.get("reservoirs", {}).items():
             reservoirs[reservoir_id] = FluidReservoir.from_config(reservoir_config)
 
-        dispense_head_instance = cls(
+        dispensehead_instance = cls(
             head_id=head_config.get("head_id", 0),
             pump_number=pump_number,
         )
 
-        dispense_head_instance.pumps = pumps
-        dispense_head_instance.ports = ports
-        dispense_head_instance.reservoirs = reservoirs
+        dispensehead_instance.pumps = pumps
+        dispensehead_instance.ports = ports
+        dispensehead_instance.reservoirs = reservoirs
 
-        return dispense_head_instance
+        return dispensehead_instance
 
-    def enable_head(self):
+    def enable(self):
         """Enable the DispenseHead object. Sets enable property to True"""
-        self.enable = True
+        self.enabled = True
 
-    def disable_head(self):
+    def disable(self):
         """Enable the DispenseHead object. Sets enable property to True"""
-        self.enable = True
+        self.enabled = True
 
-    def update_pump(self, pump_id: int, pump_config: dict):
+    def update_pump(self, pump: str, pump_config: dict):
         """Update pump configuration from a dictionary.
 
         Args:
@@ -331,7 +351,7 @@ class DispenseHeadXCaliburD:
         for config_parameter, value in pump_config.items():
             if config_parameter == "ports":
                 for port_id in pump_config["ports"]:
-                    self.ports[pump_id][port_id].update_from_config(pump_config["ports"][port_id])
+                    self.ports[pump][port_id].update_from_config(pump_config["ports"][port_id])
 
             elif hasattr(self, config_parameter):
                 attribute_value = getattr(self, config_parameter)
@@ -344,16 +364,16 @@ class DispenseHeadXCaliburD:
                     logger.warning(
                         f"Invalid type for {config_parameter}: expected {attr_type.__name__}, got {type(value).__name__}"
                     )
-                logger.info(f"Updated XCaliburDPump_{pump_id} parameter: {config_parameter}={value}")
+                logger.info(f"Updated XCaliburDPump_{pump} parameter: {config_parameter}={value}")
 
-    def to_dict_pump(self, pump_id: int) -> dict:
+    def to_dict_pump(self, pump: str) -> dict:
         pump_dict: dict = {}
-        pump_dict["number_ports"] = self.pumps[pump_id].num_ports
-        pump_dict["syringe_volume"] = self.pumps[pump_id].syringe_ul
-        pump_dict["ports"] = {port_id: asdict(port) for port_id, port in self.ports[pump_id].items()}
+        pump_dict["number_ports"] = self.pumps[pump].num_ports
+        pump_dict["syringe_volume"] = self.pumps[pump].syringe_ul
+        pump_dict["ports"] = {port_id: asdict(port) for port_id, port in self.ports[pump].items()}
         return pump_dict
 
-    def update_head(self, dispense_head_config: dict):
+    def update(self, dispensehead_config: dict):
         """Update a DispenseHead object. Will also update any child objects, such as pumps, ports, and reservoirs.
 
         Args:
@@ -364,13 +384,13 @@ class DispenseHeadXCaliburD:
             dipense_head.update(config_update)
             ```
         """
-        for config_parameter, value in dispense_head_config.items():
+        for config_parameter, value in dispensehead_config.items():
             if config_parameter == "reservoirs":
-                for reservoir_id, reservoir_config in dispense_head_config["reservoirs"].items():
+                for reservoir_id, reservoir_config in dispensehead_config["reservoirs"].items():
                     self.reservoirs[reservoir_id].update_from_config(reservoir_config)
 
             if config_parameter == "pumps":
-                for pump_id, pump_config in dispense_head_config["pumps"].items():
+                for pump_id, pump_config in dispensehead_config["pumps"].items():
                     self.update_pump(pump_id, pump_config)
 
             elif hasattr(self, config_parameter):
@@ -386,19 +406,12 @@ class DispenseHeadXCaliburD:
                     )
                 logger.info(f"Updated {self.head_id}_DispenseHead parameter: {config_parameter}={value}")
 
-    def validate_volume(self, input_volume: int) -> bool:
-        """Validate the input volume against the configurations of the XCaliburD pumps"""
-        for pump in self.pumps.values():
-            if input_volume > pump.syringe_ul:
-                return False
-        return True
-
-    def getset_pump_port(self, pump_id: int) -> tuple[bool, int]:
+    def getset_pump_port(self, pump: str) -> tuple[bool, int]:
         """For a given syringe pump, set the port to use to for aspirating fluid by checking the reservoir volume. Returns port ID for valid port if available"""
 
         valid_port_found: bool = False
         valid_port_id: int = -1
-        for port_id, port in self.ports[pump_id].items():
+        for port_id, port in self.ports[pump].items():
             if self.reservoirs[port.reservoir_id].is_fluid_available():
                 port.active = True
                 valid_port_found = True
@@ -408,7 +421,7 @@ class DispenseHeadXCaliburD:
         return (valid_port_found, valid_port_id)
 
     @pump_action
-    def initialize_head(self):
+    def initialize(self):
         """Initialize XCaliburD pumps on the DispenseHead."""
 
         for pump in self.pumps.values():
@@ -437,19 +450,28 @@ class DispenseHeadXCaliburD:
             pump.sendRcv("", execute=True)
 
     @pump_action
-    def prime(self, pumps_to_prime: list[int], prime_volume: int = 10000):
+    def prime(self, pumps: list[str], prime_volume: int = 10000):
         """Prime all ports for designated XCaliburD pumps on the DispenseHead. Fills tubing with fluid from reservoir to ensure that ports are ready for use during influx routines.
 
         Args:
             pumps_to_prime (list[int]): List of syringe pump IDs to prime.
         """
-        for pump_id in pumps_to_prime:
-            for port_id in self.ports:
-                self.pumps[pump_id].primePort(in_port=port_id, out_port=self.pumps[pump_id].head_port, volume_ul=prime_volume)
-        self.enable = True
+        for pump in pumps:
+            try:
+                for port_id in self.ports:
+                    self.pumps[pump].primePort(in_port=port_id, out_port=self.pumps[pump].head_port, volume_ul=prime_volume)
+
+                self.pumps[pump].extract(from_port=self.pumps[pump].head_port, volume_ul=self.pumps[pump].air_gap_ul)
+
+            except (ValueError, SyringeError, TecanAPITimeout, TecanAPIInvalidFrame, TecanAPIInvalidAddress) as e:
+                msg: str = f"Low level hardware XCaliburD pump error encountered: {e}"
+                logger.exception(msg, stack_info=True)
+                raise DispenseHeadError(f"Low level hardware XCaliburD pump error encountered: {e}")
+
+        self.primed = True
 
     @pump_action
-    async def aspirate(self, aspirate_commands: list[int]):
+    def aspirate(self, aspirate_commands: dict[str, int]) -> None:
         """Coordinates multi-pump aspirate operations for the DispenseHead. Port selection for each syringe pump is handling automatically by checking reservoir volumes.
 
         Args:
@@ -458,49 +480,48 @@ class DispenseHeadXCaliburD:
         Raises:
             DispenseHeadError: If any aspirate volume is negative.
             DispenseHeadWarning: If reservoirs are empty for any single syringe pump.
-
-        Examples:
-            ```
-            # Aspirate
-            dipense_head.aspirate({"0": 100, "1", 500, "2": 1000 })
-            ```
         """
-        for pump_id, aspirate_volume in enumerate(aspirate_commands):
-            if aspirate_volume < 0:
-                raise DispenseHeadError(f"Negative volume input detected for pump_{pump_id} on {self.head_id}_DispenseHead")
-
-            port_found, valid_port_id = self.getset_pump_port(pump_id)
+        if not self.primed:
+            raise DispenseHeadError(f"DispenseHead_{self.head_id} not primed")
+        for pump, aspirate_volume in aspirate_commands.items():
+            port_found, valid_port_id = self.getset_pump_port(pump)
             if not port_found:
-                raise DispenseHeadWarning(
-                    f"Reservoirs are empty for pump_{pump_id} on _{self.head_id}_DispenseHead. Skipping aspirate..."
+                raise DispenseHeadError(
+                    f"Reservoirs are empty for pump_{pump} on DispenseHead_{self.head_id}. Skipping aspirate..."
                 )
 
-            self.pumps[pump_id].extract(from_port=valid_port_id, volume_ul=aspirate_volume)
+            try:
+                time_delay: float = self.pumps[pump].extract(from_port=valid_port_id, volume_ul=aspirate_volume, execute=True)
+                time.sleep(time_delay * 1.5)
+            except (ValueError, SyringeError, TecanAPITimeout, TecanAPIInvalidFrame, TecanAPIInvalidAddress) as e:
+                msg: str = f"Low level hardware XCaliburD pump error encountered: {e}"
+                logger.exception(msg, stack_info=True)
+                raise DispenseHeadError(f"Low level hardware XCaliburD pump error encountered: {e}")
 
     @pump_action
-    def dispense(self, dispense_commands: list[int]):
-        """Coordinates multi-pump dispense operations for the DispenseHead. Fluid is dispensed to pump's coonfigured head port id.
+    def dispense(self, dispense_commands: dict[str, int]):
+        """Coordinates multi-pump dispense operations for the DispenseHead. Fluid is dispensed to pump's coonfigured head port id. Automatically handles
 
         Args:
             dispense_commands (list[int]): List of dispense volume commands. Volume index corresponds to syrige pump on the DispenseHead.
 
         Raises:
             DispenseHeadError: If any dispense volume is negative.
-
-        Examples:
-            ```
-            # Aspirate
-            dipense_head.dispense({"0": 100, "1", 500, "2": 1000 })
-            ```
         """
 
-        for pump_id, dispense_volume in enumerate(dispense_commands):
-            if dispense_volume < 0:
-                raise DispenseHeadError(
-                    f"Negative volume input detected for pump_{pump_id} on {self.head_id}_DispenseHead. Skipping dispense..."
+        for pump, dispense_volume in dispense_commands.items():
+            try:
+                time_delay: float = self.pumps[pump].dispense(
+                    to_port=self.pumps[pump].head_port, volume_ul=dispense_volume, execute=True
                 )
-
-            self.pumps[pump_id].dispense(to_port=self.pumps[pump_id].head_port, volume_ul=dispense_volume)
+                time.sleep(time_delay)
+                time_delay: float = self.pumps[pump].extract(
+                    from_port=self.pumps[pump].head_port, volume_ul=self.pumps[pump].air_gap_ul, execute=True
+                )
+            except (ValueError, SyringeError, TecanAPITimeout, TecanAPIInvalidFrame, TecanAPIInvalidAddress) as e:
+                msg: str = f"Low level hardware XCaliburD pump error encountered: {e}"
+                logger.exception(msg, stack_info=True)
+                raise DispenseHeadError(f"Low level hardware XCaliburD pump error encountered: {e}")
 
     def to_dict(self) -> dict:
         """Convert the DispenseHead to a dictionary representation.
@@ -513,8 +534,8 @@ class DispenseHeadXCaliburD:
 
         return {
             "head_id": self.head_id,
-            "in_use": self.in_use,
+            "active": self.active,
             "enabled": self.enabled,
-            "pumps": {pump_id: self.to_dict_pump(pump_id) for pump_id in self.pumps},
+            "pumps": {pump: self.to_dict_pump(pump) for pump in self.pumps},
             "reservoirs": {reservoir_id: asdict(reservoir) for reservoir_id, reservoir in self.reservoirs.items()},
         }

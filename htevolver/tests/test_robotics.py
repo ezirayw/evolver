@@ -3,15 +3,15 @@ import logging
 import os
 import sys
 
-from htevolver.htevolver_client.client import HTEvolverClient
-from htevolver.shared import RoboticsRoutines
+from htevolver.client.client import HTEvolverClient
+from htevolver.dependencies import RoboticsRoutine
 
 DEFAULT_STATION_LIST: list[int] = []
 DEFAULT_PUMP_LIST: list[int] = []
 DEFAULT_VIALS_OD: list[int] = list(range(18))
 
 # Configure client logger (logs to file)
-logger = logging.getLogger("htevolver.htevolver_client")
+logger = logging.getLogger("htevolver.client")
 logger.setLevel(logging.INFO)
 
 # Create handlers
@@ -43,7 +43,7 @@ def get_options():
         action="store",
         required=True,
         help="Robotic functions to test.",
-        choices=RoboticsRoutines._member_names_,
+        choices=RoboticsRoutine._member_names_,
     )
 
     parser.add_argument(
@@ -152,10 +152,10 @@ if __name__ == "__main__":
     pump_list = options.pump_list
     use_liquid = options.liquid
 
-    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, "./test_experiments", station_ids=station_list)
+    client = HTEvolverClient(evolver_ip, 8081, False, "./test_experiments", station_ids=station_list)
     logger.info(f"Testing HT-eVOLVER {robotic_function} function")
 
-    config = htevolver_client.request_robotics_config()
+    config = client.request_robotics_config()
     fluid_types: list[str] = []
     if config:
         for pump_id, pump_config in config["dipense_head"]["pumps"].items():
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     if robotic_function == "PIPETTE":
         if use_liquid and pump_list:
             dipense_request = build_dipense_request(pump_list)
-            htevolver_client.dipense(dipense_request)
+            client.dipense(dipense_request)
         elif not use_liquid:
             logger.error("Aborting, liquid flag is required for pipetting.")
             sys.exit()
@@ -204,7 +204,7 @@ if __name__ == "__main__":
                 try:
                     prime_cylces_input = int(input("Enter number of prime cycles to run: "))
                     if prime_cylces_input > 0:
-                        htevolver_client.prime_dipensehead(pump_list)
+                        client.prime_dipensehead(pump_list)
 
                 except ValueError:
                     logger.warning("Invalid number of prime cycles entered, try again.")
@@ -216,7 +216,7 @@ if __name__ == "__main__":
             sys.exit()
 
     if robotic_function == "INFLUX":
-        dipensehead_config = htevolver_client.request_robotics_config("dipense_head")
+        dipensehead_config = client.request_robotics_config("dipense_head")
         fluid_types: list[str] = []
         if dipensehead_config:
             for pump_id, pump_config in dipensehead_config.items():
@@ -225,6 +225,6 @@ if __name__ == "__main__":
             logger.info(f"DispenseHead configured with the fluid type: {fluid_types}")
 
         influx_request = build_influx_request(use_liquid, station_list, fluid_types)
-        htevolver_client.influx(influx_request)
+        client.influx(influx_request)
 
-    htevolver_client.disconnect()
+    client.disconnect()

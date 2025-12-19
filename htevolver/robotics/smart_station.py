@@ -6,7 +6,7 @@ import skimage as ski
 from skimage.transform import EuclideanTransform
 
 from htevolver.exceptions import SmartStationError
-from htevolver.robotics.xarm import xArmCoordinate
+from htevolver.robotics.xarm import CartesianMovement
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class xArmPlane:
         tform.estimate(vial_coordinates, np.array([vial_0, vial_17]))
         self.transform_matrix = tform
 
-    def vial_to_xarm(self, evolver_coordinates: StationCoordinate) -> xArmCoordinate:
+    def vial_to_xarm(self, evolver_coordinates: StationCoordinate, speed: int, acceleration: int) -> CartesianMovement:
         """Transform vial coordinates to xArm coordinates.
 
         Applies the rigid transformation matrix to convert from the evolver
@@ -120,7 +120,7 @@ class xArmPlane:
                 Example: StationCoordinate(x=18, y=36)
 
         Returns:
-            xArmCoordinate: The transformed coordinates in the xArm system.
+            CartesianMovement: The transformed coordinates in the xArm system.
 
         Examples:
             ```
@@ -131,7 +131,16 @@ class xArmPlane:
         """
         np_coordinates = np.array([[evolver_coordinates.x], [evolver_coordinates.y], [1]])
         transformed = np.dot(self.transform_matrix, np_coordinates)
-        return xArmCoordinate(x=transformed[0][0], y=transformed[1][0], z=self.z)
+        return CartesianMovement(
+            x=transformed[0][0],
+            y=transformed[1][0],
+            z=self.z,
+            roll=180,
+            pitch=0,
+            yaw=0,
+            speed=speed,
+            acceleration=acceleration,
+        )
 
 
 class SmartStationRobotics:

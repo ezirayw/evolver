@@ -1,20 +1,81 @@
-from typing import Protocol
+from typing import Any, Protocol
+
+from htevolver.dependencies import CartesianMovement
+
+
+class RobotArmProtocol(Protocol):
+    """Protocol defining the interface for robotic arm integrations with HT-eVOLVER"""
+
+    arm_api: Any
+    connected: bool
+    ip: str
+    home_position: CartesianMovement
+    standby_position: CartesianMovement
+
+    @classmethod
+    def from_config(cls, config: dict) -> "RobotArmProtocol":
+        """Create a RobotArm instance from a configuration"""
+        ...
+
+    def initialize(self):
+        """Run any initialization code prior to usage of the RobotArm."""
+        ...
+
+    def connect(self):
+        """Connect to the RobotArm instance."""
+        ...
+
+    def disconnect(self):
+        """Disconnect from the RobotArm instance."""
+        ...
+
+    def update(self, config: dict):
+        """Update the RobotArm configuration."""
+        ...
+
+    def stop(self):
+        """Stop the RobotArm during movement."""
+        ...
+
+    def pause(self):
+        """Pause the RobotArm during movement."""
+        ...
+
+    def resume(self):
+        """Resume RobotArm movement."""
+        ...
+
+    def move(self, coordinate: CartesianMovement):
+        """Move the RobotArm to the specified coordinate."""
+        ...
+
+    def to_dict(self) -> dict:
+        """Conver the RobotArm instance to a dictionary representation."""
+        ...
+
+
+class ToolChangeProtocol(Protocol):
+    """Protocol defining the interface for HT-eVOLVER tool change stations."""
+
+    ...
 
 
 class DispenseHeadProtocol(Protocol):
     """Protocol defining the interface for pump implementations.
 
-    This protocol defines the required interface for any pump implementation to be
-    compatible with the HT-eVOLVER system. Custom pump implementations must implement
-    all methods in this protocol.
+    Defines the required interface for any pump implementation to be
+    compatible with HT-eVOLVER.
 
     Attributes:
-        enabled (bool): Connection status of the pump.
-        primary_fluid (FluidTypes): The main fluid type handled by this pump.
+        head_id (int): Port ID that is connected to the DispenseHead needle.
+        active (bool): Boolean representing whether DispenseHead is in use.
+        enabled (bool): Boolean representing whether DispenseHead is usable for robotic operations.
+        pump_number (int): Number of syringe pumps on integrated onto the DispenseHead.
+
     """
 
     head_id: int
-    in_use: bool
+    active: bool
     enabled: bool
     pump_number: int
 
@@ -30,23 +91,19 @@ class DispenseHeadProtocol(Protocol):
         """
         ...
 
-    def enable_head(self) -> None:
+    def enable(self) -> None:
         """Enable the DispenseHead object, indicating that its ready for use."""
         ...
 
-    def disable_head(self) -> None:
+    def disable(self) -> None:
         """Disable the DispenseHead object."""
         ...
 
-    def initialize_head(self) -> None:
+    def initialize(self) -> None:
         """Initialize the DispenseHead. Run any relevant setup functions here (i.e. initializing pumps) and enable DispenseHead"""
 
-    def update_head(self, dispense_head_config: dict) -> None:
+    def update_head(self, dispensehead_config: dict) -> None:
         """Update DispenseHead object from input config"""
-        ...
-
-    def validate_volume(self, input_volume: int) -> bool:
-        """Validate an volume command against the DispenseHead configuration"""
         ...
 
     def pause(self) -> None:
@@ -65,7 +122,7 @@ class DispenseHeadProtocol(Protocol):
         """Prime pumps on DispenseHead"""
         ...
 
-    async def aspirate(self, aspirate_commands: list[int]) -> None:
+    def aspirate(self, aspirate_commands: dict[str, int]) -> None:
         """Execute aspiration commands on the DispenseHead.
 
         Args:
@@ -73,7 +130,7 @@ class DispenseHeadProtocol(Protocol):
         """
         ...
 
-    def dispense(self, dispense_commands: list[int]) -> None:
+    def dispense(self, dispense_commands: dict[str, int]) -> None:
         """Execute dispense commands on the DispenseHead.
 
         Args:

@@ -3,7 +3,7 @@ import time
 
 import serial
 
-from htevolver.shared import PacketBuilder
+from htevolver.dependencies import EvolverPacket
 
 DEFAULT_PUMP_TIME: int = 5000  # ms
 DEFAULT_OVER_PUMP_TIME: int = 0  # s
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     for vial in options.vials:
         target_payload: list[int] = [0] * len(options.vials)
         target_payload[vial] = options.pump_time
-        packets = PacketBuilder.build_packet("efflux", len(options.vials), "request", target_payload)
+        packets = EvolverPacket.create_packet("efflux", len(options.vials), "request", target_payload)
         # efflux_start_time = 0
         try:
             print(f"Connected to {options.serial_port}")

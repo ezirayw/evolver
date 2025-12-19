@@ -1,132 +1,166 @@
 ---
 # eVOLVER parameter configurations
-parameters:
-  phase_0:
-    overflow_left:
-      recurring: true
-      address: 10
-      data_length: 1
-      value: [0, 0, 0, 0]
-    overflow_right:
-      recurring: true
-      address: 11
-      data_length: 1
-      value: [0, 0, 0, 0]
-    temp_config:
-      recurring: true
-      address: 12
-      data_length: 4
-      value: [0, 0, 0, 0]
+parameter_config:
+  overflow_left:
+    parameter_type: sensor
+    payload_length: 4
+    phase: 0
+    process_fn: vial
+    mask: null
+    recurring_payload: null
+    command_dtype: null
+    voltage_dtype: Int32
+    calibrated_dtype: Float32
+  overflow_right:
+    parameter_type: sensor
+    payload_length: 4
+    phase: 0
+    process_fn: vial
+    mask: null
+    recurring_payload: null
+    command_dtype: null
+    voltage_dtype: Int32
+    calibrated_dtype: Float32
+  stir:
+    parameter_type: effector
+    payload_length: 4
+    phase: 0
+    process_fn: station
+    mask: null
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: null
+    calibrated_dtype: null
+  od_led_left:
+    parameter_type: effector
+    payload_length: 4
+    phase: 1
+    process_fn: vial
+    mask:
+      vial_0: true
+      vial_1: true
+      vial_2: true
+      vial_3: true
+      vial_4: true
+      vial_5: true
+      vial_6: true
+      vial_7: true
+      vial_8: true
+      vial_9: false
+      vial_10: false
+      vial_11: false
+      vial_12: false
+      vial_13: false
+      vial_14: false
+      vial_15: false
+      vial_16: false
+      vial_17: false
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: null
+    calibrated_dtype: null
+  od_led_right:
+    parameter_type: effector
+    payload_length: 4
+    phase: 1
+    process_fn: vial
+    mask:
+      vial_0: false
+      vial_1: false
+      vial_2: false
+      vial_3: false
+      vial_4: false
+      vial_5: false
+      vial_6: false
+      vial_7: false
+      vial_8: false
+      vial_9: true
+      vial_10: true
+      vial_11: true
+      vial_12: true
+      vial_13: true
+      vial_14: true
+      vial_15: true
+      vial_16: true
+      vial_17: true
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: null
+    calibrated_dtype: null
+  od_left:
+    parameter_type: sensor
+    payload_length: 36
+    phase: 1
+    process_fn: vial
+    mask:
+      vial_0: true
+      vial_1: true
+      vial_2: true
+      vial_3: false
+      vial_4: false
+      vial_5: false
+      vial_6: true
+      vial_7: true
+      vial_8: true
+      vial_9: false
+      vial_10: false
+      vial_11: false
+      vial_12: true
+      vial_13: true
+      vial_14: true
+      vial_15: false
+      vial_16: false
+      vial_17: false
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: Int32
+    calibrated_dtype: Float32
+  od_right:
+    parameter_type: sensor
+    payload_length: 36
+    phase: 1
+    process_fn: vial
+    mask:
+      vial_0: false
+      vial_1: false
+      vial_2: false
+      vial_3: true
+      vial_4: true
+      vial_5: true
+      vial_6: false
+      vial_7: false
+      vial_8: false
+      vial_9: true
+      vial_10: true
+      vial_11: true
+      vial_12: false
+      vial_13: false
+      vial_14: false
+      vial_15: true
+      vial_16: true
+      vial_17: true
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: Int32
+    calibrated_dtype: Float32
+  temp:
+    parameter_type: sensor
+    payload_length: 4
+    phase: 0
+    process_fn: station
+    mask: null
+    recurring_payload: null
+    command_dtype: int
+    voltage_dtype: null
+    calibrated_dtype: null
 
-  phase_1:
-    od_led_left:
-      recurring: true
-      address: 4
-      data_length: 8
-      value: [0, 0, 0, 0, 0, 0, 0, 0]
-    od_led_right:
-      recurring: true
-      address: 5
-      data_length: 8
-      value: [0, 0, 0, 0, 0, 0, 0, 0]
-    od_90_left:
-      recurring: true
-      address: 6
-      data_length: 36
-      value:
-        [
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-        ]
-    od_90_right:
-      recurring: true
-      address: 7
-      data_length: 36
-      value:
-        [
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-          128,
-        ]
-    temp:
-      recurring: true
-      address: 8
-      data_length: 4
-      value: [0, 0, 0, 0]
-    stir:
-      recurring: true
-      address: 9
-      data_length: 4
-      value: [0, 0, 0, 0]
+# recent command_dtypes listed here
+recent_payloads: null
 
-  phase_2: null
+experiments:
+  parent_directory: null
+  active:
+    test_active: null
 
 # eVOLVER server parameter configurations
 broadcast_timing: 10
@@ -142,6 +176,6 @@ calibration_cache_directory: "/home/pi/calibrations/cache"
 # Serial communication
 serial_end_outgoing: "_!"
 serial_end_incoming: end
-serial_port: "/dev/ttyAMA0"
+# serial_port: "/dev/ttyAMA0"
 serial_baudrate: 9600
 serial_timeout: 2

@@ -1,30 +1,28 @@
 ---
-xArm:
-  enabled: False
+xarm:
   ip: "192.168.1.244"
-  roll: 180
-  pitch: 0
-  yaw: 0
-  speed: 100
-  mvacc: 100
-  reference_positions:
-    home_position:
-      x: 207
-      y: 0
-      z: 112
-    standby_position:
-      x: 207
-      y: 0
-      z: 500
-    tool_0:
-      x: None
-      y: None
-      z: None
+  connected: False
+  home:
+    x: 207
+    y: 0
+    z: 112
+    roll: 180
+    pitch: 0
+    yaw: 0
+  standby:
+    x: 207
+    y: 0
+    z: 112
+    roll: 180
+    pitch: 0
+    yaw: 0
+  max_speed: 500
+  max_mvacc: 2000
 
-dipense_heads:
+dispenseheads:
   media:
     head_id: 0
-    pump_type: DispenseHeadXCaliburD
+    pump_type: Dummy
     pump_number: 3
     in_use: True
     enabled: True
@@ -41,6 +39,7 @@ dipense_heads:
       0:
         number_ports: 3
         syringe_volume: 1000 #uL
+        air_gap: 20 #uL
         direction: CW
         microstep: False
         waste_port_id: 3
@@ -61,6 +60,7 @@ dipense_heads:
       1:
         number_ports: 3
         syringe_volume: 1000 #uL
+        air_gap: 20 #uL
         direction: CW
         microstep: False
         waste_port_id: 3
@@ -81,7 +81,7 @@ dipense_heads:
       2:
         number_ports: 3
         syringe_volume: 1000 #uL
-        direction: CW
+        air_gap: 20 #uL        direction: CW
         microstep: False
         waste_port_id: 3
         head_port_id: 1
@@ -113,12 +113,6 @@ smart_stations:
       vial17_x: 111
       vial17_y: -381.2
       z: 429.5
-  1:
-    plane_out: null
-    plane_in: null
-  2:
-    plane_out: null
-    plane_in: null
-  3:
-    plane_out: null
-    plane_in: null
+  1: null
+  2: null
+  3: null

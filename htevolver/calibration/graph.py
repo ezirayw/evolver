@@ -3,7 +3,7 @@ import logging
 import numpy as np
 
 from htevolver.calibration.calibration_cli import get_calibration_options
-from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
+from htevolver.client.data_analysis import CalibrationData, GraphCalibration
 
 logger = logging.getLogger(__name__)
 

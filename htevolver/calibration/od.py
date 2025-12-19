@@ -25,15 +25,15 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 from htevolver.calibration.calibration_cli import get_calibration_options
-from htevolver.htevolver_client.client import HTEvolverClient
-from htevolver.htevolver_client.data_analysis import CalibrationData, GraphCalibration
+from htevolver.client.client import HTEvolverClient
+from htevolver.client.data_analysis import CalibrationData, GraphCalibration
 
 DEFAULT_VIALS_OD = list(range(18))
 STANDARD_NUM_MIN: int = 3
 LOGGING_DIR: str = "/home/pi/logs"
 
 # Configure client logger (logs to file)
-client_logger = logging.getLogger("htevolver.htevolver_client")
+client_logger = logging.getLogger("htevolver.client")
 calibration_logger = logging.getLogger("htevolver.calibration")
 
 # Configure calibration logger (logs to console)
@@ -60,7 +60,7 @@ logger = calibration_logger
 
 
 def collect_od_data(
-    htevolver_client: HTEvolverClient, vial_list: list[int], station_id: int, num_standards: int
+    client: HTEvolverClient, vial_list: list[int], station_id: int, num_standards: int
 ) -> dict[str, CalibrationData]:
     """Collect optical density calibration data for a station.
 
@@ -69,7 +69,7 @@ def collect_od_data(
     across all vials.
 
     Args:
-        htevolver_client (HTEvolverClient): Client connected to the HT-eVOLVER system.
+        client (HTEvolverClient): Client connected to the HT-eVOLVER system.
         vial_list (list[int]): List of vial IDs to calibrate.
         station_id (int): ID of the station to calibrate.
         num_standards (int): Number of standard OD values to use.
@@ -135,7 +135,7 @@ def collect_od_data(
         logger.info("Collecting photodiode voltage readings, do not move vials or exit. Should take about a minute...")
 
         # Use the generalized collect_voltage_readings function
-        voltage_triplets = htevolver_client.get_new_od(station_list=[station_id])
+        voltage_triplets = client.get_new_od(station_list=[station_id])
         logger.info("Done collecting new photodiode voltage readings, processing data now... ")
 
         # triplet data is collected, store median representative voltage value
@@ -149,9 +149,7 @@ def collect_od_data(
                 )
                 calibration_data[vial_key].step_num = step_num
 
-        CalibrationData.save_calibration(
-            calibration_data, htevolver_client.evolver.evolver_conf["calibration_cache_directory"], "od"
-        )
+        CalibrationData.save_calibration(calibration_data, client.evolver.evolver_conf["calibration_cache_directory"], "od")
 
         # instruct user to rearrange vials and continue to next step in the procedure
         logger.info(
@@ -235,7 +233,7 @@ if __name__ == "__main__":
         logger.error(f"More standards are needed, must be at least {STANDARD_NUM_MIN}")
         sys.exit(2)
 
-    htevolver_client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
+    client = HTEvolverClient(evolver_ip, 8081, False, "/home/pi/experiments/test", station_ids=station_list)
 
     # start data collection procedure based on target calibration protocol
     for station_id in station_list:
@@ -254,15 +252,15 @@ if __name__ == "__main__":
             except ValueError:
                 logger.exception("Invalid list, try again")
 
-        collected_calibration_data = collect_od_data(htevolver_client, vial_list, station_id, int(options.standard_number))
+        collected_calibration_data = collect_od_data(client, vial_list, station_id, int(options.standard_number))
         final_calibration_data = fit_data(collected_calibration_data, True)
 
         # Send calibration data to server for long-term storage
         serialized_calibration_data = CalibrationData.to_json(final_calibration_data)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        htevolver_client.evolver.send_calibration(
+        client.evolver.send_calibration(
             serialized_calibration_data,
             metadata={"parameter": "od", "timestamp": timestamp, "station_key": f"station_{station_id}"},
         )
 
-    htevolver_client.disconnect()
+    client.disconnect()
